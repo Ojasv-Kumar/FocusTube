@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "FocusTube",
+  "version": "1.0.0",
+  "description": "Make YouTube intentional, useful, and calm.",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://www.googleapis.com/*",
+    "https://api.openai.com/*"
+  ],
+  "optional_host_permissions": ["https://*/*"],
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "FocusTube",
+    "default_popup": "src/popup/popup.html"
+  },
+  "options_ui": {
+    "page": "src/options/options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["src/content/loader.js"],
+      "css": ["src/content/hide.css"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/content/*.js",
+        "src/config.js",
+        "src/storage.js",
+        "src/selectors.js",
+        "src/messages.js",
+        "src/errors.js",
+        "src/logger.js",
+        "src/utils.js",
+        "data/*.json",
+        "data/mock-responses/*.json"
+      ],
+      "matches": ["https://www.youtube.com/*"]
+    }
+  ]
+}

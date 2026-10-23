@@ -1,0 +1,7 @@
+/* Early, conservative state only. Mode-specific rules are generated from selectors.js. */
+html[data-focustube-mode="startup"] ytd-app,
+html[data-focustube-mode="picker"] ytd-app { visibility: hidden !important; }
+focustube-picker-host,
+focustube-switcher-host,
+focustube-results-host,
+focustube-home-host { all: initial; }
