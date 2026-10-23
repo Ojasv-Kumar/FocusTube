@@ -1,7 +1,7 @@
 # Assumptions and implementation decisions
 
 1. One saved mode and Interest topic apply across open YouTube tabs. When ask-on-new-tab is enabled, each new tab presents the required choice picker once per tab session.
-2. The Manifest V3 content-script entry is a classic document-start bootstrap. It gates the YouTube app and media, then dynamically imports local ES modules; all code is packaged and no remote code or fonts are used.
+2. The Manifest V3 content-script entry is a classic document-start bootstrap followed by a prebuilt local IIFE bundle. It gates the YouTube app and media without importing extension modules or stylesheets from the YouTube page origin; the unpacked folder is ready to load without a build step.
 3. Relax removes FocusTube-owned UI, styles, and attributes and does not start the SPA MutationObserver or retrieval pipeline. A Chrome storage listener remains so a popup mode change can activate another mode without reloading.
 4. The service worker talks only to the loopback backend. Provider keys are stored in `backend/.env`, which is ignored by Git. The extension exposes no provider-key inputs and contains no direct AI API call.
 5. The backend defaults to HTML retrieval in the extension and uses Gemini model names explicitly configured from Google AI Studio. Ollama is the first query-expansion provider, Gemini fast is the backup, and deterministic query variants are the final fallback.

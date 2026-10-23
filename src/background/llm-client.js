@@ -58,7 +58,9 @@ export class LlmClient {
     } catch (error) {
       if (error?.name === "AbortError") throw new TimeoutError("FocusTube backend timed out.");
       if (error?.code) throw error;
-      throw new NetworkError("Could not connect to FocusTube's local backend.", { cause: error });
+      const unavailable = new NetworkError("Could not reach the local FocusTube backend.", { cause: error });
+      unavailable.code = "BACKEND_UNAVAILABLE";
+      throw unavailable;
     }
   }
 
@@ -77,8 +79,12 @@ export class LlmClient {
     const timer = setTimeout(() => controller.abort(), CONFIG.Backend.healthTimeoutMs);
     try {
       const response = await this.fetch(`${CONFIG.Backend.baseUrl.replace(/\/+$/, "")}/health`, { signal: controller.signal });
-      return response.ok ? await response.json() : { ok: false };
-    } catch { return { ok: false }; }
+      if (!response.ok) return { ok: false, errorCode: `HTTP_${response.status}` };
+      const health = await response.json();
+      return health?.ok ? health : { ok: false, errorCode: "INVALID_HEALTH_RESPONSE" };
+    } catch (error) {
+      return { ok: false, errorCode: error?.name === "AbortError" ? "HEALTH_TIMEOUT" : "FETCH_FAILED" };
+    }
     finally { clearTimeout(timer); }
   }
 }

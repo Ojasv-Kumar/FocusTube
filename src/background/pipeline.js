@@ -32,6 +32,7 @@ async function loadMock(mode, query, action) {
 function baseMetadata(startedAt) { return { providers: [], cacheHit: false, tokenEstimate: 0, timingsMs: {}, degraded: false, reason: null, fallbackLabel: null, channels: [] }; }
 function pipelineCacheKey(mode, query, interest, action, settings) {
   return cacheKey({ mode, query: normalizeQuery(query).toLocaleLowerCase(), interest: normalizeQuery(interest).toLocaleLowerCase(), action,
+    retrievalProvider: settings.retrievalProvider || CONFIG.Retrieval.defaultProvider, hasYoutubeApiKey: Boolean(settings.youtubeApiKey),
     prompts: [QUERY_EXPANSION.version, LEARN_JUDGE.version, INTEREST_EXPANSION.version, INTEREST_JUDGE.version, CURIOSITY_JUDGE.version],
     mockMode: settings.mockMode, resultsPerSearch: settings.resultsPerSearch, curiosityStrictness: settings.curiosityStrictness, pipelineConfig: CONFIG.Pipeline });
 }
@@ -47,7 +48,7 @@ async function retrieveWithCache(queries, settings, cache) {
   const groups = new Array(queries.length);
   const providers = new Set();
   const missing = [];
-  const keys = queries.map(query => cacheKey({ kind: "retrieval", query: normalizeQuery(query).toLocaleLowerCase(), provider: "html", resultCount: CONFIG.Pipeline.resultsPerQuery, minimumDuration: CONFIG.Pipeline.minimumVideoDurationSeconds, shortsMaxDuration: CONFIG.Pipeline.shortsMaxDurationSeconds, excludeLive: CONFIG.Pipeline.excludeLiveStreams }));
+  const keys = queries.map(query => cacheKey({ kind: "retrieval", query: normalizeQuery(query).toLocaleLowerCase(), provider: settings.retrievalProvider || CONFIG.Retrieval.defaultProvider, hasApiKey: Boolean(settings.youtubeApiKey), resultCount: CONFIG.Pipeline.resultsPerQuery, minimumDuration: CONFIG.Pipeline.minimumVideoDurationSeconds, shortsMaxDuration: CONFIG.Pipeline.shortsMaxDurationSeconds, excludeLive: CONFIG.Pipeline.excludeLiveStreams }));
   for (let index = 0; index < queries.length; index += 1) {
     const cached = await cache.get(keys[index]);
     if (cached) { groups[index] = cached.videos; cached.providers?.forEach(provider => providers.add(provider)); }
@@ -156,12 +157,25 @@ export async function runPipeline(request, settings, { cache = cacheStorage(), c
       metadata.llmProviders = [...llm.providers];
       metadata.usedFallback = llm.usedFallback;
       if (!isCurrent()) return { ok: false, errorCode: "CANCELLED", userMessage: "A newer request replaced this one." };
-      if (aiError || rankError) return { ok: false, errorCode: aiError?.code || rankError?.code || "AI_UNAVAILABLE", userMessage: "FocusTube curation is unavailable right now. Native YouTube results are restored. Retry when the backend is available." };
+      if ((aiError || rankError) && mode === "learn") return { ok: false, errorCode: aiError?.code || rankError?.code || "AI_UNAVAILABLE", userMessage: "FocusTube curation is unavailable right now. Native YouTube results are restored. Retry when the backend is available." };
+      if (rankError && (mode === "interest" || mode === "curiosity")) {
+        // Keep these browsing modes useful when retrieval worked but the
+        // ranking provider did not. Never imply that these candidates were
+        // AI curated; make the fallback explicit in the feed.
+        judged = candidateVideos.map(video => ({ ...video, reason: "Retrieved from YouTube search; not AI-ranked." }));
+        metadata.degraded = true;
+        metadata.reason = rankError?.code || "AI_UNAVAILABLE";
+        metadata.fallbackLabel = "AI ranking is unavailable. These are unranked YouTube search matches.";
+      }
       const videos = judged.slice(0, Math.min(CONFIG.Pipeline.maxVideosShown, settings.resultsPerSearch || CONFIG.Pipeline.maxVideosShown));
       if (!videos.length) return { ok: false, errorCode: "EMPTY_RESULTS", userMessage: "No videos met the quality threshold. Try a broader query or show original results." };
-      metadata.degraded = Boolean(aiError);
-      metadata.reason = aiError ? aiError.code || "AI_UNAVAILABLE" : null;
-      metadata.fallbackLabel = llm.usedFallback ? "A configured AI backup was used for this path." : null;
+      if (!metadata.degraded) {
+        metadata.degraded = Boolean(aiError);
+        metadata.reason = aiError ? aiError.code || "AI_UNAVAILABLE" : null;
+        metadata.fallbackLabel = llm.usedFallback ? "A configured AI backup was used for this path." : null;
+      } else if (!metadata.fallbackLabel && aiError) {
+        metadata.fallbackLabel = "Query expansion fell back to a simpler search. Results were still reviewed.";
+      }
       metadata.channels = channels.map(name => ({ name, reason: "Suggested as a useful channel for this interest." }));
       metadata.timingsMs.total = Date.now() - startedAt;
       const result = { ok: true, videos, channels: metadata.channels, metadata };

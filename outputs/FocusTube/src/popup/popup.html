@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FocusTube</title><link rel="stylesheet" href="popup.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FocusTube</title><link rel="stylesheet" href="../design-tokens.css"><link rel="stylesheet" href="popup.css"></head>
 <body>
   <main class="popup">
-    <header><p class="eyebrow">FOCUSTUBE</p><h1>Choose your mode</h1><p class="intro">YouTube will follow this mode on open tabs.</p></header>
+    <header><p class="eyebrow">FOCUSTUBE</p><h1>Choose your mode</h1><p class="intro">YouTube will follow this mode on open tabs.</p><p id="current-mode" class="current">Current mode · Loading</p></header>
     <section class="modes" aria-label="FocusTube modes">
       <button data-mode="learn"><strong>Learn</strong><span>Guided results for a specific topic.</span></button>
       <button data-mode="interest"><strong>Interest</strong><span>A feed and search around one interest.</span></button>
@@ -12,7 +12,7 @@
     </section>
     <label class="interest-label">Interest for Interest mode <input id="interest" maxlength="120" placeholder="e.g. robotics and embedded systems"></label>
     <p id="status" role="status" aria-live="polite">Loading…</p>
-    <div class="tools"><button id="health" class="quiet">Check YouTube selectors</button><button id="options" class="quiet">Options</button></div>
+    <div class="tools"><span id="backend" aria-live="polite">Backend · Checking</span><button id="connect-backend" class="quiet" hidden>Connect</button><button id="options" class="quiet">Options</button></div>
   </main>
   <script type="module" src="popup.js"></script>
 </body>

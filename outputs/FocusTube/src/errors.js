@@ -12,18 +12,30 @@ export class CancelledError extends FocusTubeError { constructor(message = "This
 export function friendlyError(error) {
   const code = error?.code || "UNKNOWN_ERROR";
   const messages = {
-    NETWORK_ERROR: "Could not connect. Check your connection, then try again.",
-    QUOTA_ERROR: "The YouTube API quota is exhausted. Switch retrieval to HTML or show original results.",
-    LLM_ERROR: "AI ranking is unavailable. You can retry or show original YouTube results.",
+    NETWORK_ERROR: "A network request failed. Check the service named in FocusTube's diagnostics, then retry or show original YouTube results.",
+    BACKEND_UNAVAILABLE: "This computer could not reach FocusTube's local AI backend. Start node backend/server.mjs on this computer and check http://127.0.0.1:41731/health.",
+    YOUTUBE_API_UNAVAILABLE: "YouTube Data API retrieval failed. FocusTube tried the HTML fallback too; check the API key or choose HTML retrieval, then retry.",
+    YOUTUBE_HTML_UNAVAILABLE: "YouTube search could not be retrieved. Check your YouTube connection or consent page, then retry or show original results.",
+    YOUTUBE_HTML_FETCH_FAILED: "FocusTube could not fetch YouTube search. Check this browser's connection, VPN, or network filtering, then retry or show original results.",
+    YOUTUBE_CONSENT_REQUIRED: "YouTube is asking this browser to confirm consent or verify traffic. Open YouTube normally, complete any prompt, then retry FocusTube.",
+    YOUTUBE_HTML_PARSE_FAILED: "YouTube returned a search page FocusTube could not read. Use the YouTube API in Options or show original YouTube results.",
+    QUOTA_ERROR: "The optional YouTube API provider is disabled. Use native YouTube results or the HTML retrieval fallback.",
+    LLM_ERROR: "AI curation is unavailable. Retry after the local backend recovers or use native YouTube results.",
     PARSE_ERROR: "The AI response could not be understood. You can retry or show original results.",
-    CONFIG_ERROR: error?.message || "Check the provider settings in FocusTube options.",
+    CONFIG_ERROR: error?.message || "Check FocusTube's local backend configuration.",
     TIMEOUT_ERROR: "The request took too long. You can retry or show original results.",
     CANCELLED: "This request was replaced by a newer action.",
-    BAD_KEY: "The provider rejected the API key. Check it in FocusTube options.",
-    RATE_LIMITED: "The provider is rate limiting requests. Wait a moment and retry.",
-    PROVIDER_DOWN: "The AI provider is temporarily unavailable. Try again shortly.",
-    PERMISSION_DENIED: "FocusTube does not have access to this provider host. Grant access in options.",
+    BAD_KEY: "The configured AI provider rejected a key. Check the local backend settings.",
+    RATE_LIMITED: "The configured AI provider is rate limiting requests. Wait a moment and retry.",
+    PROVIDER_DOWN: "The configured AI provider is temporarily unavailable. Try again shortly.",
+    PERMISSION_DENIED: "FocusTube could not reach the local backend. Check its loopback address and host permission.",
     EMPTY_RESULTS: "No useful videos were found. Try a broader search or show original results."
   };
-  return { errorCode: code, userMessage: messages[code] || "FocusTube hit a problem. You can retry or return to YouTube results." };
+  let userMessage = messages[code] || "FocusTube hit a problem. You can retry or return to YouTube results.";
+  const failures = error?.providerFailures;
+  if (Array.isArray(failures) && failures.length) {
+    const detail = [...new Set(failures.map(item => `${item.provider}: ${item.code}`))].join("; ");
+    userMessage += ` Retrieval attempts: ${detail}.`;
+  }
+  return { errorCode: code, userMessage };
 }

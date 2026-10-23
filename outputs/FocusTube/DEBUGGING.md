@@ -1,39 +1,29 @@
 # FocusTube debugging
 
-## Open the service worker console
+## Check the local backend
 
-1. Open `chrome://extensions`.
-2. Find FocusTube and click **service worker → Inspect**.
-3. Enable **Debug logging** in the FocusTube Options page, save, and retry the action.
-4. Filter the console for `[FocusTube]`. Logs identify the module and include correlation IDs for pipeline actions. API keys and request headers are never logged.
+Start it from the project root with `node backend/server.mjs`. Visit `http://127.0.0.1:41731/health`. Health reports configured/available Gemini-key counts and Ollama reachability/model presence, never key values. See [backend/README.md](backend/README.md) for model setup and troubleshooting.
 
-## Inspect a YouTube tab
+## Inspect the extension
 
-Open DevTools on YouTube. In the JavaScript context dropdown, choose the FocusTube content-script context and run:
-
-```js
-window.FocusTube.selectorHealth()
-```
-
-Or open the extension popup and use **Check YouTube selectors**. The report lists each fallback selector and whether it matched the current page. A selector can legitimately be unmatched when checking a page type it does not apply to.
+1. Open `chrome://extensions`, find FocusTube, and choose **service worker → Inspect**.
+2. Enable **Debug logging** in Options and retry. Correlation IDs connect page actions, service-worker pipeline logs, and backend calls. Logs must not contain provider keys.
+3. In a YouTube tab's FocusTube content-script context, run `window.FocusTube.selectorHealth()` or use the selector health check in Options.
 
 ## Common symptoms
 
-- **Picker or switcher does not appear:** refresh the YouTube tab after loading/reloading the unpacked extension. Check the content-script console for `[FocusTube][loader]`; module bootstrap failures can indicate a missing web-accessible file or browser restriction.
-- **YouTube is hidden after page load:** inspect the root element's `data-focustube-mode`. It should change from `startup`/`picker` to a saved mode. If not, reload the extension and tab.
-- **Search panel says retrieval failed:** the YouTube API key may be missing/invalid/quota-limited, or YouTube may have changed its HTML page structure. Use HTML retrieval in Auto mode, enable mock mode for a demo, or show original results.
-- **AI ranking unavailable:** open Options and use **Test LLM connection**. `BAD_KEY`, `RATE_LIMITED`, `PROVIDER_DOWN`, `TIMEOUT_ERROR`, `PARSE_ERROR`, and `PERMISSION_DENIED` identify the failure category. Basic results remain available when retrieval succeeded.
-- **Custom provider gets a permission error:** save Options again and grant the requested HTTPS hostname. A declined permission does not prevent saving settings.
-- **No videos in mock mode:** use one of `backpropagation`, `op amp basics`, or `recursion in python`. Other queries intentionally do not borrow unrelated fixture rows.
-- **Home feed remains visible:** use the selector health check on the home page. YouTube may have reshaped its home renderer; add the verified selector fallback in `src/selectors.js`.
-- **Autoplay remains on:** the player toggle selector may have changed or appeared outside the configured retry window. Autoplay suppression is best effort. Once a user turns it back on, FocusTube stops trying for that tab session.
-- **A result looks stale:** correlation ID traces plus the current page URL help identify it. Content results are gated by a monotonically increasing request token, so a superseded response should be ignored.
-- **Extension reload made an open tab stop responding:** refresh YouTube. The content script will report that its extension context was invalidated rather than breaking the page.
+- **Picker or gate remains:** the gate watchdog is controlled by `CONFIG.Behaviour.gateWatchdogMs`. Refresh the tab and inspect the `[FocusTube][loader]` console message. The watchdog should restore YouTube and show a small failure notice if startup does not finish.
+- **Popup says connected but a feed fails:** the popup checks only the local AI backend's `/health`. Interest and Curiosity also retrieve YouTube search results. The page now reports YouTube retrieval failures separately and tries HTML retrieval if the optional Data API fails.
+- **The other computer says `FETCH_FAILED`:** `127.0.0.1` always means that same computer. Start this project's backend on that computer, install Ollama and the configured model there, create its own `backend/.env`, then confirm `http://127.0.0.1:41731/health` on that computer.
+- **Backend is genuinely unavailable:** start `node backend/server.mjs`, verify the configured port equals `CONFIG.Backend.baseUrl`, grant FocusTube access to `http://127.0.0.1`, then reload the extension and refresh YouTube.
+- **Interest/Curiosity AI ranking is unavailable:** if YouTube retrieval worked, the feed keeps the search matches and labels them as unranked instead of showing an empty error panel.
+- **Learn results fall back to YouTube:** the backend may be unavailable, Ollama/Gemini may be down, or YouTube HTML retrieval may have changed. Native YouTube results are the recovery path; retry after service recovery.
+- **No mock videos:** try `backpropagation`, `op amp basics`, or `recursion in python`. Mock mode is offline and makes no retrieval/backend calls.
+- **Learn bar missing:** inspect whether a current `mastheadSearchRegion` selector matches. YouTube's masthead DOM is not a stable public API.
+- **Native results do not return after an error:** inspect `data-focustube-search`; it should be removed when the results error renders or the results UI is disposed.
+- **Unexpected setting behavior:** save Options and refresh if the unpacked extension was reloaded. Check `chrome.storage.local` for migrated current settings; obsolete API key fields should be removed.
+- **A YouTube control overlaps the picker:** inspect the document-start gate (`data-focustube-gate="pending"`), `ytd-app.inert`, and the picker host stacking context. Test fresh hard loads on home, Shorts, and watch routes.
 
-## Correlation IDs
+## Verification limits
 
-Each search/feed action creates a short correlation ID. The content message carries it to the service worker; pipeline and LLM debug entries use the same ID. If logs are sparse, turn on debug logging before repeating the action. Cached actions can finish without making an LLM request.
-
-## Tests
-
-Run the pure logic checks from this folder with `node --test`. They cover parsing, validation, normalization, dedupe, cache TTL/eviction, quota accounting, page types, and generated hide selectors. They do not replace the live browser checklist in the README.
+Automated tests cover pure logic and fake backend upstreams. They do not verify current YouTube selectors, video playback state, sidebar layout at multiple viewport widths, Chrome picker focus behavior, or real Google/Ollama services. Use the unchecked checklist in README for those checks.

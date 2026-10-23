@@ -1,6 +1,6 @@
 /* All product tuning lives here. Keep units and safe ranges beside each value. */
 export const CONFIG = Object.freeze({
-  Backend: { baseUrl: "http://127.0.0.1:41731", healthTimeoutMs: 1800, requestTimeoutMs: 30_000, maxRetries: 1, retryDelayMs: 350, enabled: true },
+  Backend: { baseUrl: "http://127.0.0.1:41731", healthTimeoutMs: 6000, requestTimeoutMs: 30_000, maxRetries: 1, retryDelayMs: 350, enabled: true },
   LLM: {
     fastModel: "backend-managed",
     smartModel: "backend-managed",
@@ -62,8 +62,8 @@ export const CONFIG = Object.freeze({
     }
   },
   Retrieval: {
-    defaultProvider: "html", // API retrieval is disabled for end users.
-    apiProviderEnabled: false,
+    defaultProvider: "auto", // Prefer the YouTube Data API when configured; use HTML as a fallback.
+    apiProviderEnabled: true,
     apiDailySearchCalls: 100, // current YouTube Search Queries bucket default
     apiDailySearchUnits: 100,
     apiDailyQuotaLimit: 10_000, // videos.list and other read quota units

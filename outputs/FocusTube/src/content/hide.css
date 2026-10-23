@@ -1,7 +1,11 @@
 /* Early, conservative state only. Mode-specific rules are generated from selectors.js. */
 html[data-focustube-mode="startup"] ytd-app,
 html[data-focustube-mode="picker"] ytd-app { visibility: hidden !important; }
-focustube-picker-host,
-focustube-switcher-host,
+/* Resetting custom-element hosts with `all: initial` overrides the Shadow
+   DOM component's :host layout rules. Keep the page styles isolated while
+   explicitly preserving each host's required layout. */
+focustube-picker-host { position: fixed !important; inset: 0 !important; z-index: 2147483647 !important; display: block !important; }
+focustube-switcher-host { position: fixed !important; right: 18px !important; bottom: 18px !important; z-index: 2147483000 !important; display: block !important; }
 focustube-results-host,
-focustube-home-host { all: initial; }
+focustube-home-host,
+focustube-search-host { display: block !important; }

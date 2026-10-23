@@ -2,6 +2,7 @@ import { CONFIG } from "./config.js";
 
 export const DEFAULT_SETTINGS = Object.freeze({
   activeMode: null, interestText: CONFIG.Settings.defaultInterestTopic,
+  youtubeApiKey: "", retrievalProvider: CONFIG.Retrieval.defaultProvider,
   askForModeEveryTab: CONFIG.Settings.askForModeEveryTab,
   keepCommentsVisible: CONFIG.Settings.keepCommentsVisible,
   hideShortsInLearn: CONFIG.Settings.hideShortsInLearn,
@@ -11,10 +12,16 @@ export const DEFAULT_SETTINGS = Object.freeze({
   curiosityStrictness: CONFIG.Settings.curiosityStrictness, density: CONFIG.Settings.density,
   mockMode: CONFIG.Settings.mockMode, debugLogging: CONFIG.Settings.debugLogging
 });
-const obsoleteKeys = ["llmApiKey", "youtubeApiKey", "llmBaseUrl", "fastModel", "smartModel", "retrievalProvider"];
+const obsoleteKeys = ["llmApiKey", "llmBaseUrl", "fastModel", "smartModel"];
 export function validateSettings(input = {}) {
   const out = { ...DEFAULT_SETTINGS };
   for (const key of ["interestText", "defaultInterestTopic"]) if (typeof input[key] === "string") out[key] = input[key].trim().slice(0, 120);
+  if (typeof input.youtubeApiKey === "string") out.youtubeApiKey = input.youtubeApiKey.trim();
+  if (["auto", "api", "html"].includes(input.retrievalProvider)) out.retrievalProvider = input.retrievalProvider;
+  // Older/local settings can retain "api" even when no YouTube key was ever
+  // saved in this browser. In that state use the working HTML fallback rather
+  // than leaving Interest and Curiosity feeds with no retrieval provider.
+  if (out.retrievalProvider === "api" && !out.youtubeApiKey) out.retrievalProvider = "auto";
   for (const key of ["askForModeEveryTab", "keepCommentsVisible", "hideShortsInLearn", "disableAutoplayInLearn", "showReasons", "mockMode", "debugLogging"]) if (typeof input[key] === "boolean") out[key] = input[key];
   if ([5, 8, 10, 15].includes(Number(input.resultsPerSearch))) out.resultsPerSearch = Number(input.resultsPerSearch);
   if (["relaxed", "balanced", "strict"].includes(input.curiosityStrictness)) out.curiosityStrictness = input.curiosityStrictness;

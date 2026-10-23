@@ -1,7 +1,7 @@
 import { CONFIG } from "./config.js";
 
 export function normalizeQuery(value, maxLength = CONFIG.Pipeline.queryMaxChars) {
-  return String(value ?? "").normalize("NFC").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, maxLength);
+  return Array.from(String(value ?? "").normalize("NFC").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim()).slice(0, maxLength).join("");
 }
 export function makeCorrelationId() { return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`; }
 export function clamp(value, minimum, maximum, fallback = minimum) {

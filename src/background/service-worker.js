@@ -10,7 +10,8 @@ import { CONFIG } from "../config.js";
 
 const cache = new Cache(chrome.storage.local);
 function publicSettings(settings) {
-  return { ...settings };
+  const { youtubeApiKey, ...safe } = settings;
+  return { ...safe, hasYoutubeApiKey: Boolean(youtubeApiKey) };
 }
 function extensionPage(sender) { return typeof sender?.url === "string" && sender.url.startsWith(chrome.runtime.getURL("")); }
 function respondWith(promise, sendResponse) {

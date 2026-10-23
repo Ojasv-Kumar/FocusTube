@@ -3,6 +3,9 @@ import { CONFIG } from "../config.js";
 const statusNode = document.getElementById("status");
 const interestInput = document.getElementById("interest");
 const backendNode = document.getElementById("backend");
+const connectBackendButton = document.getElementById("connect-backend");
+const backendUrl = new URL(CONFIG.Backend.baseUrl);
+const backendPermission = `${backendUrl.protocol}//${backendUrl.hostname}/*`;
 let currentSettings = null;
 function message(type, payload = {}) {
   return new Promise(resolve => {
@@ -17,11 +20,75 @@ function paintMode(mode) {
 function showStatus(text) { statusNode.textContent = text; }
 async function updateBackend() {
   backendNode.textContent = "Backend · Checking";
-  const response = await message(MESSAGE.BACKEND_HEALTH);
-  const health = response.health;
-  const connected = response.ok && health?.ok;
-  backendNode.textContent = `Backend · ${connected ? "Connected" : "Not connected"}`;
-  backendNode.dataset.connected = String(Boolean(connected));
+  const hasPermission = await new Promise(resolve => {
+    try { chrome.permissions.contains({ origins: [backendPermission] }, resolve); }
+    catch { resolve(false); }
+  });
+  if (!hasPermission) {
+    backendNode.textContent = "Backend · Access needed";
+    backendNode.dataset.connected = "false";
+    backendNode.title = "FocusTube needs permission to contact its local backend.";
+    connectBackendButton.hidden = false;
+    return;
+  }
+  await checkBackendFromPopup();
+}
+async function checkBackendFromPopup() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CONFIG.Backend.healthTimeoutMs);
+  try {
+    // Probe directly from this visible extension page. Besides being the
+    // clearest connectivity check, this avoids reporting a service-worker
+    // fetch failure as if the backend itself were down.
+    const response = await fetch(`${CONFIG.Backend.baseUrl.replace(/\/+$/, "")}/health`, { cache: "no-store", signal: controller.signal });
+    const health = await response.json().catch(() => null);
+    if (!response.ok) throw Object.assign(new Error(`HTTP_${response.status}`), { code: `HTTP_${response.status}` });
+    if (!health?.ok) throw Object.assign(new Error("INVALID_HEALTH_RESPONSE"), { code: "INVALID_HEALTH_RESPONSE" });
+    backendNode.dataset.connected = "true";
+    if (!health.ollama?.reachable) {
+      backendNode.textContent = "Backend · Connected (Ollama unavailable)";
+      backendNode.title = "The backend answered, but Ollama is unreachable.";
+    } else if (!health.ollama?.present) {
+      backendNode.textContent = "Backend · Connected (model missing)";
+      backendNode.title = `The backend answered, but ${health.ollama?.model || "the configured Ollama model"} is not installed.`;
+    } else {
+      backendNode.textContent = "Backend · Connected";
+      backendNode.title = `Local backend is responding. Gemini keys configured: ${health.geminiKeys?.configured ?? "unknown"}.`;
+    }
+    connectBackendButton.hidden = true;
+  } catch (error) {
+    const code = error?.name === "AbortError" ? "HEALTH_TIMEOUT" : error?.code || "FETCH_FAILED";
+    backendNode.textContent = `Backend · ${code}`;
+    backendNode.dataset.connected = "false";
+    backendNode.title = `Popup health request failed: ${error?.message || code}. Confirm the backend is running at ${CONFIG.Backend.baseUrl}, then click Connect to retry.`;
+    connectBackendButton.hidden = false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function connectBackend() {
+  connectBackendButton.disabled = true;
+  connectBackendButton.textContent = "Connecting…";
+  backendNode.textContent = "Backend · Requesting access";
+  try {
+    const granted = await new Promise(resolve => {
+      try { chrome.permissions.request({ origins: [backendPermission] }, resolve); }
+      catch { resolve(false); }
+    });
+    if (!granted) {
+      backendNode.textContent = "Backend · Access denied";
+      backendNode.title = "Allow FocusTube to access http://127.0.0.1, then click Connect again.";
+      return;
+    }
+    await checkBackendFromPopup();
+  } catch (error) {
+    backendNode.textContent = error?.name === "AbortError" ? "Backend · HEALTH_TIMEOUT" : `Backend · ${error?.code || "FETCH_FAILED"}`;
+    backendNode.dataset.connected = "false";
+    backendNode.title = `Could not reach ${CONFIG.Backend.baseUrl}: ${error?.message || error}`;
+  } finally {
+    connectBackendButton.disabled = false;
+    connectBackendButton.textContent = "Connect";
+  }
 }
 async function load() {
   const response = await message(MESSAGE.GET_SETTINGS);
@@ -41,5 +108,6 @@ document.querySelectorAll("[data-mode]").forEach(button => button.addEventListen
   currentSettings = response.settings; paintMode(mode); showStatus(`${mode[0].toUpperCase()}${mode.slice(1)} mode saved. Open YouTube tabs update without reloading.`);
 }));
 document.getElementById("options").addEventListener("click", () => { try { chrome.runtime.openOptionsPage(); } catch { showStatus("Could not open Options. Try chrome://extensions."); } });
+connectBackendButton.addEventListener("click", () => { void connectBackend(); });
 interestInput.maxLength = CONFIG.ModesPicker.interestMaxChars;
 void load();

@@ -25,19 +25,7 @@ const gate = {
 window.__FOCUSTUBE_GATE__ = gate;
 let tabAlreadyChosen = false;
 try { tabAlreadyChosen = sessionStorage.getItem("focustube.pickerSeen") === "1"; } catch { /* A blocked session store falls back to the required picker. */ }
-function startMain(gated) {
-  import(chrome.runtime.getURL("src/config.js")).then(module => {
-    if (gated) { if (gateTimer) clearTimeout(gateTimer); gateTimer = setTimeout(() => gate.fail(), module.CONFIG.Behaviour.gateWatchdogMs); }
-    return import(chrome.runtime.getURL("src/content/main.js"));
-  }).catch(error => {
-    try { console.warn("[FocusTube][loader] Could not start extension modules.", error?.name || "error"); } catch { /* page remains intact when the gate was not needed. */ }
-    if (gated) gate.fail();
-    else gate.fail();
-  });
-}
-if (tabAlreadyChosen) {
-  startMain(false);
-} else {
+if (!tabAlreadyChosen) {
   try {
     if (root) { root.dataset.focustubeMode = "startup"; root.dataset.focustubeGate = "pending"; }
     const lock = () => document.querySelectorAll("ytd-app").forEach(app => { app.inert = true; });
@@ -57,8 +45,10 @@ if (tabAlreadyChosen) {
       }
     });
     mediaObserver.observe(root, { childList: true, subtree: true });
+    // The packaged content bundle runs immediately after this bootstrap.
+    // Keep a fixed watchdog here so the bootstrap does not need an ES module
+    // import from the YouTube document origin.
     gateTimer = setTimeout(() => gate.fail(), 15_000);
-    startMain(true);
   } catch (error) {
     try { console.warn("[FocusTube][loader] FocusTube could not initialize.", error?.name || "error"); } catch { /* page remains untouched */ }
     gate.fail();
