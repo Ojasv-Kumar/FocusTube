@@ -7,8 +7,14 @@ export function createHost(hostName, hostId) {
   } catch { return null; }
 }
 export function addStyle(shadow, css) {
+  try {
+    const tokens = document.createElement("link");
+    tokens.rel = "stylesheet";
+    tokens.href = chrome.runtime.getURL("src/design-tokens.css");
+    shadow.append(tokens);
+  } catch { /* Inline component styling has resilient fallbacks. */ }
   const style = document.createElement("style");
-  style.textContent = css;
+  style.textContent = `${css}\n:host{font-family:var(--ft-font,system-ui,sans-serif);color:var(--ft-text,#f0f2f5);line-height:1.5} .wrap,.dialog,.card,.control,.mode,.panel,.status,.original,.channel{color:var(--ft-text,#f0f2f5);background-color:var(--ft-surface,#15181d);border-color:var(--ft-border,#ffffff18);box-shadow:var(--ft-shadow,0 18px 55px #0008)} .title,.role,.sectionTitle,.videoTitle,.mode strong{color:var(--ft-text,#f0f2f5)} .intro,.query,.meta,.reason,.confidence,.footer,.mode span,.channel span{color:var(--ft-muted,#a1a8b3)} .button,.mode,.switch,.input,.interest{color:var(--ft-text,#f0f2f5);background:var(--ft-raised,#1b1f26);border-color:var(--ft-border,#ffffff18)} .button.primary{color:#10140d;background:var(--ft-accent,#a9e66e);border-color:var(--ft-accent,#a9e66e)} .skeleton{background:linear-gradient(100deg,#191d23 25%,#242a31 38%,#191d23 60%);background-size:200% 100%}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}`;
   shadow.append(style);
   return style;
 }
