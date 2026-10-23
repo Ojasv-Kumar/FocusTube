@@ -72,6 +72,7 @@ test("query expansion always includes the original and removes duplicates", () =
 test("query normalization trims controls and preserves Unicode", () => {
   assert.equal(normalizeQuery("  हिंदी\tAI\u0000  "), "हिंदी AI");
   assert.equal(normalizeQuery("long".repeat(100), 12).length, 12);
+  assert.equal(normalizeQuery("a".repeat(239) + "😀z", 240).endsWith("😀"), true);
 });
 
 test("dedupe merges repeated IDs and near-identical titles", () => {
