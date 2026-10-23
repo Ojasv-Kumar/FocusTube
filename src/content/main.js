@@ -2,13 +2,14 @@ import { CONFIG } from "../config.js";
 import { DEFAULT_SETTINGS } from "../storage.js";
 import { MESSAGE, sendMessage } from "../messages.js";
 import { logger, setDebug } from "../logger.js";
-import { makeCorrelationId } from "../utils.js";
+import { makeCorrelationId, normalizeQuery } from "../utils.js";
 import { SELECTORS, queryFirst, selectorHealth, pageTypeFromUrl } from "../selectors.js";
 import { applyMode, setPageType, setCuratedSearch, enterPickerState } from "./mode-manager.js";
 import { openModePicker } from "./mode-picker.js";
 import { createModeSwitcher } from "./mode-switcher.js";
 import { createResultsUI } from "./results-ui.js";
 import { createHomeUI } from "./home-ui.js";
+import { createLearnSearch } from "./learn-search.js";
 import { startAutoplayGuard } from "./autoplay.js";
 
 let settings = { ...DEFAULT_SETTINGS };
@@ -18,10 +19,12 @@ let picker = null;
 let switcher = null;
 let resultsUI = null;
 let homeUI = null;
+let learnSearchUI = null;
 let autoplayCleanup = null;
 let requestToken = 0;
 let navTimer = null;
 let observer = null;
+let navigationCleanup = null;
 let disposed = false;
 let lastUrl = location.href;
 let currentPageType = "other";
@@ -30,17 +33,23 @@ const MODE_NAMES = { learn: "Learn", interest: "Interest", curiosity: "Curiosity
 function hideCurrentPanels() {
   resultsUI?.dispose(); resultsUI = null;
   homeUI?.dispose(); homeUI = null;
+  learnSearchUI?.dispose(); learnSearchUI = null;
   autoplayCleanup?.(); autoplayCleanup = null;
   setCuratedSearch(false);
 }
 function safeSessionGet(key) { try { return sessionStorage.getItem(key); } catch { return null; } }
 function safeSessionSet(key, value) { try { sessionStorage.setItem(key, value); } catch { /* Picker state is an optimization. */ } }
 function updateSwitcher() { switcher?.update(activeMode); }
+function syncSwitcher() {
+  if (!CONFIG.Behaviour.showFloatingSwitcher || activeMode === "relax") { switcher?.dispose(); switcher = null; return; }
+  if (!switcher) switcher = createModeSwitcher(openPicker);
+  updateSwitcher();
+}
 function persistMode(mode, interest = interestText) {
   activeMode = mode;
   interestText = interest;
   settings = { ...settings, activeMode: mode, interestText: interest };
-  updateSwitcher();
+  syncSwitcher();
   applyPageBehavior("mode-change");
   void sendMessage(MESSAGE.SET_MODE, { mode, interestText: interest }, makeCorrelationId());
 }
@@ -51,13 +60,15 @@ function openPicker() {
   enterPickerState();
   picker = openModePicker({
     currentMode: activeMode,
-    interestText,
+    interestText: interestText || settings.defaultInterestTopic || "",
+    required: Boolean(document.documentElement?.hasAttribute("data-focustube-gate")),
     onSelect: (mode, interest) => {
       picker = null;
       safeSessionSet("focustube.pickerSeen", "1");
+      window.__FOCUSTUBE_GATE__?.release();
       persistMode(mode, interest);
     },
-    onClose: () => { picker = null; }
+    onClose: () => { picker = null; if (settings.activeMode) void applyPageBehavior("picker-closed"); }
   });
   if (!picker) applyPageBehavior("picker-unavailable");
 }
@@ -69,9 +80,6 @@ async function readSettings() {
 }
 function installHealthCheck() {
   try {
-    window.FocusTube = Object.freeze({ selectorHealth: () => selectorHealth(document) });
-  } catch { /* The popup path remains available. */ }
-  try {
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message?.type !== "focustube-health-check") return false;
       try { sendResponse({ ok: true, pageType: pageTypeFromUrl(location.href), report: selectorHealth(document) }); }
@@ -82,6 +90,8 @@ function installHealthCheck() {
 }
 function showPageFailure(error, correlationId) {
   logger.error("content", `page action failed (${correlationId})`, error?.name || "unknown");
+  if (resultsUI) { resultsUI.renderError("FocusTube could not load curated results. Native YouTube results are restored."); return; }
+  if (homeUI) { homeUI.renderError("FocusTube could not update this feed. Try again or switch to Relax."); return; }
   const current = document.getElementById(SELECTORS.resultsHost) || document.getElementById(SELECTORS.homeHost);
   if (!current) return;
   const shadow = current.shadowRoot;
@@ -141,12 +151,22 @@ async function applyPageBehavior(reason = "navigation") {
   hideCurrentPanels();
   applyMode(activeMode, settings);
   if (activeMode === "relax") return;
+  if (activeMode === "learn") {
+    const masthead = await waitForElement(SELECTORS.mastheadSearchRegion);
+    if (token !== requestToken) return;
+    if (masthead) {
+      const query = currentPageType === "search" ? new URL(location.href).searchParams.get("search_query") || "" : "";
+      learnSearchUI = createLearnSearch({ query, onSubmit: value => { const safeQuery = normalizeQuery(value, CONFIG.Pipeline.queryMaxChars); if (!safeQuery) return; try { location.href = `/results?search_query=${encodeURIComponent(safeQuery)}`; } catch { logger.warn("content", "could not submit learning query"); } } });
+    }
+  }
   if (currentPageType === "shorts" && CONFIG.Modes[activeMode].redirectShortsToWatch) {
     const videoId = location.pathname.split("/").filter(Boolean)[1];
     if (videoId) { try { location.replace(`/watch?v=${encodeURIComponent(videoId)}`); } catch { /* Keep the short visible if redirect fails. */ } }
     return;
   }
-  if (currentPageType === "watch" && CONFIG.Modes[activeMode].disableAutoplay) autoplayCleanup = startAutoplayGuard();
+  if (activeMode === "learn" && location.pathname === "/feed/subscriptions") { try { location.replace("/"); } catch { /* Keep current page if navigation is blocked. */ } return; }
+  const disableAutoplay = activeMode === "learn" ? settings.disableAutoplayInLearn !== false : CONFIG.Modes[activeMode].disableAutoplay;
+  if (currentPageType === "watch" && disableAutoplay) autoplayCleanup = startAutoplayGuard();
   try {
     if (currentPageType === "home") {
       const anchor = await waitForElement(["ytd-browse[page-subtype='home'] #primary", "ytd-browse #primary", "ytd-app #content"]);
@@ -155,8 +175,9 @@ async function applyPageBehavior(reason = "navigation") {
         mode: activeMode,
         interest: interestText,
         onSearch: value => {
-          if (!value) return;
-          try { location.href = `/results?search_query=${encodeURIComponent(value.slice(0, CONFIG.Pipeline.queryMaxChars))}`; }
+          const safeQuery = normalizeQuery(value, CONFIG.Pipeline.queryMaxChars);
+          if (!safeQuery) return;
+          try { location.href = `/results?search_query=${encodeURIComponent(safeQuery)}`; }
           catch { logger.warn("content", "could not submit the learning prompt"); }
         },
         onUseOriginal: () => persistMode("relax", interestText),
@@ -182,7 +203,7 @@ async function applyPageBehavior(reason = "navigation") {
       return;
     }
     if (currentPageType === "search") {
-      const anchor = await waitForElement(["ytd-search", "ytd-app #content"]);
+      const anchor = await waitForElement(["ytd-search #primary", "ytd-search", "ytd-app #content"]);
       if (token !== requestToken || !anchor) return;
       const query = new URL(location.href).searchParams.get("search_query") || "";
       if (!query.trim()) return;
@@ -195,7 +216,7 @@ async function applyPageBehavior(reason = "navigation") {
           else resultsUI.renderError(result);
         }).catch(error => showPageFailure(error, makeCorrelationId()));
       };
-      resultsUI = createResultsUI({ mode: activeMode, query, parent: anchor, onRetry: retry });
+      resultsUI = createResultsUI({ mode: activeMode, query, parent: anchor, settings, onRetry: retry });
       if (!resultsUI) return;
       resultsUI.renderSkeleton();
       await loadSearch(query, token, (state, result) => {
@@ -217,14 +238,25 @@ function scheduleNavigation(reason) {
   }, CONFIG.Behaviour.navigationDebounceMs);
 }
 function watchNavigation() {
+  if (navigationCleanup) return;
   try {
-    window.addEventListener("yt-navigate-start", () => scheduleNavigation("yt-navigate-start"));
-    window.addEventListener("yt-navigate-finish", () => scheduleNavigation("yt-navigate-finish"));
-    window.addEventListener("popstate", () => scheduleNavigation("popstate"));
+    const onStart = () => scheduleNavigation("yt-navigate-start");
+    const onFinish = () => scheduleNavigation("yt-navigate-finish");
+    const onPopstate = () => scheduleNavigation("popstate");
+    window.addEventListener("yt-navigate-start", onStart);
+    window.addEventListener("yt-navigate-finish", onFinish);
+    window.addEventListener("popstate", onPopstate);
     observer = new MutationObserver(() => {
       if (location.href !== lastUrl) scheduleNavigation("mutation-observer-url-change");
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
+    navigationCleanup = () => {
+      observer?.disconnect(); observer = null;
+      window.removeEventListener("yt-navigate-start", onStart);
+      window.removeEventListener("yt-navigate-finish", onFinish);
+      window.removeEventListener("popstate", onPopstate);
+      if (navTimer) clearTimeout(navTimer); navTimer = null;
+    };
   } catch (error) { logger.warn("content", "navigation observer could not be attached", error?.name || "unknown"); }
 }
 async function boot() {
@@ -234,23 +266,23 @@ async function boot() {
     setDebug(settings.debugLogging);
     interestText = settings.interestText || "";
     activeMode = settings.activeMode || "relax";
-    switcher = createModeSwitcher(openPicker);
-    updateSwitcher();
+    syncSwitcher();
     installHealthCheck();
-    watchNavigation();
     const hasSeenPicker = safeSessionGet("focustube.pickerSeen") === "1";
-    if (CONFIG.Behaviour.askForModeOnEveryNewTab && !hasSeenPicker) openPicker();
+    if (settings.askForModeEveryTab && !hasSeenPicker) openPicker();
     else if (!settings.activeMode) openPicker();
-    else await applyPageBehavior("boot");
+    else { window.__FOCUSTUBE_GATE__?.release(); if (activeMode !== "relax") watchNavigation(); await applyPageBehavior("boot"); }
     try {
       chrome.storage.onChanged.addListener((changes, area) => {
         if (area !== "local") return;
         if (changes.activeMode) activeMode = changes.activeMode.newValue || "relax";
         if (changes.interestText) interestText = changes.interestText.newValue || "";
-        if (changes.showComments) settings.showComments = changes.showComments.newValue;
-        if (changes.debugLogging) { settings.debugLogging = changes.debugLogging.newValue; setDebug(settings.debugLogging); }
-        if (changes.activeMode || changes.interestText || changes.showComments) {
-          updateSwitcher();
+        for (const key of ["askForModeEveryTab", "keepCommentsVisible", "hideShortsInLearn", "disableAutoplayInLearn", "resultsPerSearch", "showReasons", "defaultInterestTopic", "curiosityStrictness", "density", "mockMode", "debugLogging"]) if (changes[key]) settings[key] = changes[key].newValue;
+        if (changes.debugLogging) setDebug(settings.debugLogging);
+        if (changes.activeMode || changes.interestText || changes.keepCommentsVisible || changes.hideShortsInLearn || changes.disableAutoplayInLearn || changes.resultsPerSearch || changes.showReasons || changes.density || changes.mockMode) {
+          syncSwitcher();
+          if (activeMode !== "relax" && !observer) watchNavigation();
+          if (activeMode === "relax") navigationCleanup?.();
           if (picker?.host?.isConnected) { picker.close(); picker = null; }
           void applyPageBehavior("storage-change");
         }
@@ -259,11 +291,9 @@ async function boot() {
     logger.info("content", `ready ${startId}; mode=${activeMode}`);
   } catch (error) {
     logger.error("content", `boot failed ${startId}`, error?.name || "unknown");
-    try { document.documentElement?.removeAttribute("data-focustube-mode"); } catch { /* Do not interfere with YouTube. */ }
+    try { window.__FOCUSTUBE_GATE__?.fail(); document.documentElement?.removeAttribute("data-focustube-mode"); } catch { /* Do not interfere with YouTube. */ }
   }
 }
 
-window.addEventListener("error", event => logger.error("content", "page integration error", event.message || "unknown"));
-window.addEventListener("unhandledrejection", event => { logger.error("content", "handled rejected promise", event.reason?.name || "unknown"); event.preventDefault(); });
-window.addEventListener("pagehide", () => { disposed = true; requestToken += 1; observer?.disconnect(); if (navTimer) clearTimeout(navTimer); hideCurrentPanels(); });
+window.addEventListener("pagehide", () => { disposed = true; requestToken += 1; navigationCleanup?.(); hideCurrentPanels(); });
 void boot();

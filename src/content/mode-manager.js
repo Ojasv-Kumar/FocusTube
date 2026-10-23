@@ -21,13 +21,16 @@ export function applyMode(mode, settings = {}) {
     root.removeAttribute("data-focustube-page");
     root.removeAttribute("data-focustube-hide-comments");
     root.removeAttribute("data-focustube-search");
+    root.removeAttribute("data-focustube-hide-shorts");
     try { document.querySelector("style[data-focustube-styles]")?.remove(); } catch { /* No active hiding rules remain. */ }
     installed = false;
     return;
   }
   ensureStyle();
   root.dataset.focustubeMode = safeMode;
-  if (safeMode === "learn" && (CONFIG.Modes.learn.hideComments || settings.showComments === false)) root.dataset.focustubeHideComments = "true";
+  if (safeMode === "learn" && settings.hideShortsInLearn !== false) root.dataset.focustubeHideShorts = "true";
+  else root.removeAttribute("data-focustube-hide-shorts");
+  if (safeMode === "learn" && (CONFIG.Modes.learn.hideComments || settings.keepCommentsVisible === false)) root.dataset.focustubeHideComments = "true";
   else delete root.dataset.focustubeHideComments;
 }
 export function setPageType(pageType, mode = "relax") {

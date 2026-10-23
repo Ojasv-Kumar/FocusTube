@@ -3,6 +3,7 @@ export const SELECTORS = Object.freeze({
   homeFeed: ["ytd-rich-grid-renderer", "ytd-browse[page-subtype='home'] #primary ytd-rich-grid-renderer"],
   searchResults: ["ytd-search", "ytd-section-list-renderer"],
   searchContents: ["ytd-search #contents", "ytd-section-list-renderer #contents"],
+  searchResultItems: ["ytd-search ytd-video-renderer", "ytd-search ytd-rich-item-renderer", "ytd-search ytd-reel-shelf-renderer", "ytd-search ytd-horizontal-card-list-renderer"],
   videoRenderer: ["ytd-video-renderer", "ytd-rich-item-renderer"],
   shortsShelves: ["ytd-reel-shelf-renderer", "ytd-rich-shelf-renderer[is-shorts]", "ytd-reel-item-renderer"],
   shortsTab: ["a[href^='/shorts']", "tp-yt-paper-tab a[href^='/shorts']"],
@@ -14,10 +15,15 @@ export const SELECTORS = Object.freeze({
   nativeHome: ["ytd-browse[page-subtype='home'] #primary", "ytd-browse[page-subtype='home'] #contents"],
   nativeSearch: ["ytd-search #primary", "ytd-search #contents"],
   player: ["#movie_player", "ytd-player"],
+  subscriptions: ["a[href='/feed/subscriptions']", "ytd-guide-entry-renderer a[href='/feed/subscriptions']", "ytd-mini-guide-entry-renderer a[href='/feed/subscriptions']"],
+  notificationBell: ["ytd-notification-topbar-button-renderer", "#notification-button"],
+  nativeSearchBox: ["ytd-masthead #center ytd-searchbox", "ytd-searchbox"],
+  mastheadSearchRegion: ["ytd-masthead #center", "ytd-masthead #search"],
   modePickerHost: "focustube-picker-host",
   resultsHost: "focustube-results-host",
   homeHost: "focustube-home-host",
-  switcherHost: "focustube-switcher-host"
+  switcherHost: "focustube-switcher-host",
+  learnSearchHost: "focustube-search-host"
 });
 
 export function queryFirst(selectors, root = document) {
@@ -66,15 +72,21 @@ export function makeHideCss(modes) {
   };
   for (const mode of ["learn", "interest", "curiosity"]) {
     const settings = modes[mode];
-    if (settings.hideShorts) add(mode, ["shortsShelves", "shortsTab"]);
+    if (settings.hideShorts && mode !== "learn") add(mode, ["shortsShelves", "shortsTab"]);
     if (settings.hideTrending) add(mode, ["trending"]);
     if (settings.hideEndscreen) add(mode, ["endscreen"]);
     if (settings.hideSidebarRecommendations) add(mode, ["watchSidebar"]);
     if (settings.hideHomeFeed) add(mode, ["homeFeed"], `[data-focustube-page="home"]`);
   }
+  if (modes.learn.hideSubscriptions) rules.push(`html[data-focustube-mode="learn"] ${SELECTORS.subscriptions.join(",html[data-focustube-mode=\"learn\"] ")}{display:none!important}`);
+  if (modes.learn.hideNotifications) rules.push(`html[data-focustube-mode="learn"] ${SELECTORS.notificationBell.join(",html[data-focustube-mode=\"learn\"] ")}{display:none!important}`);
+  rules.push(`html[data-focustube-mode="learn"][data-focustube-hide-shorts="true"] ${[...SELECTORS.shortsShelves, ...SELECTORS.shortsTab].join(",html[data-focustube-mode=\"learn\"][data-focustube-hide-shorts=\"true\"] ")}{display:none!important}`);
   const scoped = (rootSelector, selectors) => selectors.map(selector => `${rootSelector} ${selector}`).join(",");
+  rules.push(`html[data-focustube-mode="learn"] ${SELECTORS.nativeSearchBox.join(",html[data-focustube-mode=\"learn\"] ")}{display:none!important}`);
   rules.push(`${scoped('html[data-focustube-hide-comments="true"]', SELECTORS.comments)}{display:none!important}`);
-  rules.push(`${scoped('html[data-focustube-search="true"]', SELECTORS.searchContents)}{display:none!important}`);
+  rules.push(`${scoped('html[data-focustube-search="true"]', SELECTORS.searchResultItems)}{display:none!important}`);
   rules.push("html[data-focustube-mode='startup'] body,html[data-focustube-mode='picker'] body{overflow:hidden!important}");
+  rules.push('html[data-focustube-gate="pending"] ytd-app{visibility:hidden!important;pointer-events:none!important}');
+  rules.push('html[data-focustube-gate="pending"] body{overflow:hidden!important}');
   return rules.join("\n");
 }
