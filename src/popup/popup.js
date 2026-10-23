@@ -2,6 +2,7 @@ import { MESSAGE, makeRequest } from "../messages.js";
 import { CONFIG } from "../config.js";
 const statusNode = document.getElementById("status");
 const interestInput = document.getElementById("interest");
+const backendNode = document.getElementById("backend");
 let currentSettings = null;
 function message(type, payload = {}) {
   return new Promise(resolve => {
@@ -9,41 +10,36 @@ function message(type, payload = {}) {
     catch { resolve({ ok: false, errorCode: "CONTEXT_INVALIDATED", userMessage: "Reload FocusTube and try again." }); }
   });
 }
-function paintMode(mode) { document.querySelectorAll("[data-mode]").forEach(button => button.classList.toggle("selected", button.dataset.mode === mode)); }
+function paintMode(mode) {
+  document.querySelectorAll("[data-mode]").forEach(button => { const selected = button.dataset.mode === mode; button.classList.toggle("selected", selected); button.setAttribute("aria-pressed", String(selected)); });
+  document.getElementById("current-mode").textContent = `Current mode · ${mode[0].toUpperCase()}${mode.slice(1)}`;
+}
 function showStatus(text) { statusNode.textContent = text; }
+async function updateBackend() {
+  backendNode.textContent = "Backend · Checking";
+  const response = await message(MESSAGE.BACKEND_HEALTH);
+  const health = response.health;
+  const connected = response.ok && health?.ok;
+  backendNode.textContent = `Backend · ${connected ? "Connected" : "Not connected"}`;
+  backendNode.dataset.connected = String(Boolean(connected));
+}
 async function load() {
   const response = await message(MESSAGE.GET_SETTINGS);
-  if (!response.ok) { showStatus(response.userMessage); return; }
+  if (!response.ok) { showStatus(response.userMessage); void updateBackend(); return; }
   currentSettings = response.settings;
-  interestInput.value = currentSettings.interestText || "";
+  interestInput.value = currentSettings.interestText || currentSettings.defaultInterestTopic || "";
   paintMode(currentSettings.activeMode || "relax");
-  showStatus(currentSettings.mockMode ? "Mock mode · offline demo" : `Provider · ${currentSettings.retrievalProvider}`);
+  showStatus(currentSettings.mockMode ? "Mock mode · offline demo fixtures" : "Choose a mode for your YouTube tabs.");
+  void updateBackend();
 }
 document.querySelectorAll("[data-mode]").forEach(button => button.addEventListener("click", async () => {
   const mode = button.dataset.mode;
-  const interestText = interestInput.value.trim() || currentSettings?.interestText || "";
+  const interestText = interestInput.value.trim() || currentSettings?.interestText || currentSettings?.defaultInterestTopic || "";
   if (mode === "interest" && interestText.length < CONFIG.ModesPicker.interestMinChars) { showStatus(`Add at least ${CONFIG.ModesPicker.interestMinChars} characters for your interest.`); interestInput.focus(); return; }
   const response = await message(MESSAGE.SET_MODE, { mode, interestText });
   if (!response.ok) { showStatus(`${response.errorCode}: ${response.userMessage}`); return; }
   currentSettings = response.settings; paintMode(mode); showStatus(`${mode[0].toUpperCase()}${mode.slice(1)} mode saved. Open YouTube tabs update without reloading.`);
 }));
-document.getElementById("options").addEventListener("click", () => { try { chrome.runtime.openOptionsPage(); } catch { showStatus("Could not open options. Try chrome://extensions."); } });
-document.getElementById("health").addEventListener("click", () => {
-  showStatus("Checking the current YouTube page…");
-  try {
-    chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-      const error = chrome.runtime.lastError;
-      const tab = tabs?.[0];
-      if (error || !tab?.id || !String(tab.url || "").startsWith("https://www.youtube.com/")) { showStatus("Open a YouTube tab, then run the selector check again."); return; }
-      chrome.tabs.sendMessage(tab.id, { type: "focustube-health-check" }, response => {
-        const sendError = chrome.runtime.lastError;
-        if (sendError || !response?.ok) { showStatus("Content script unavailable. Refresh YouTube and retry."); return; }
-        const matched = Object.values(response.report).flat().filter(item => item.matched).length;
-        const total = Object.values(response.report).flat().length;
-        showStatus(`Selector check: ${matched}/${total} fallbacks matched on this ${response.pageType} page. See the FocusTube content-script console for details.`);
-      });
-    });
-  } catch { showStatus("Could not inspect this tab. Refresh YouTube and retry."); }
-});
-void load();
+document.getElementById("options").addEventListener("click", () => { try { chrome.runtime.openOptionsPage(); } catch { showStatus("Could not open Options. Try chrome://extensions."); } });
 interestInput.maxLength = CONFIG.ModesPicker.interestMaxChars;
+void load();

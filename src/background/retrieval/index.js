@@ -27,6 +27,7 @@ export function mergeVideos(groups, nearDuplicateThreshold = CONFIG.Pipeline.nea
 export function selectProvider(settings, { apiKey = settings.youtubeApiKey } = {}) {
   const html = new HtmlProvider();
   const api = () => new ApiProvider({ apiKey });
+  if (!CONFIG.Retrieval.apiProviderEnabled) return { provider: html, name: "html" };
   if (settings.retrievalProvider === "html") return { provider: html, name: "html" };
   if (settings.retrievalProvider === "api") {
     if (!apiKey) throw new ConfigError("Add a YouTube Data API key in options, or switch retrieval provider to HTML.");
@@ -38,7 +39,7 @@ export async function retrieveQueries(queries, settings, options = {}) {
   const groups = new Array(queries.length);
   const used = new Set();
   let cursor = 0, fatal = null;
-  const names = settings.retrievalProvider === "html" ? ["html"] : settings.retrievalProvider === "api" ? ["api"] : settings.youtubeApiKey ? ["api", "html"] : ["html"];
+  const names = CONFIG.Retrieval.apiProviderEnabled && settings.retrievalProvider !== "html" && settings.youtubeApiKey ? ["api", "html"] : ["html"];
   const concurrency = Math.max(1, Math.min(CONFIG.Pipeline.concurrency, queries.length || 1));
   const runWorker = async () => {
     while (cursor < queries.length) {
@@ -46,7 +47,7 @@ export async function retrieveQueries(queries, settings, options = {}) {
       let lastError = null;
       for (const name of names) {
         try {
-          const { provider } = name === "api" ? { provider: new ApiProvider({ apiKey: settings.youtubeApiKey }) } : { provider: new HtmlProvider() };
+          const { provider } = name === "api" && CONFIG.Retrieval.apiProviderEnabled ? { provider: new ApiProvider({ apiKey: settings.youtubeApiKey }) } : { provider: new HtmlProvider() };
           groups[index] = await provider.search(queries[index], { maxResults: CONFIG.Pipeline.resultsPerQuery });
           used.add(name); lastError = null; break;
         } catch (error) { lastError = error; if (name === "api") continue; }

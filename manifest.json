@@ -3,13 +3,11 @@
   "name": "FocusTube",
   "version": "1.0.0",
   "description": "Make YouTube intentional, useful, and calm.",
-  "permissions": ["storage", "activeTab"],
+  "permissions": ["storage", "activeTab", "tabs"],
   "host_permissions": [
     "https://www.youtube.com/*",
-    "https://www.googleapis.com/*",
-    "https://api.openai.com/*"
+    "http://127.0.0.1/*"
   ],
-  "optional_host_permissions": ["https://*/*"],
   "background": {
     "service_worker": "src/background/service-worker.js",
     "type": "module"
@@ -34,6 +32,7 @@
     {
       "resources": [
         "src/content/*.js",
+        "src/design-tokens.css",
         "src/config.js",
         "src/storage.js",
         "src/selectors.js",

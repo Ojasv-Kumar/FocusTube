@@ -6,13 +6,11 @@ import { makeCorrelationId } from "../utils.js";
 import { Cache } from "./cache.js";
 import { runPipeline } from "./pipeline.js";
 import { LlmClient } from "./llm-client.js";
-import { ApiProvider } from "./retrieval/api-provider.js";
 import { CONFIG } from "../config.js";
 
 const cache = new Cache(chrome.storage.local);
 function publicSettings(settings) {
-  const { llmApiKey, youtubeApiKey, ...safe } = settings;
-  return { ...safe, hasLlmApiKey: Boolean(llmApiKey), hasYoutubeApiKey: Boolean(youtubeApiKey) };
+  return { ...settings };
 }
 function extensionPage(sender) { return typeof sender?.url === "string" && sender.url.startsWith(chrome.runtime.getURL("")); }
 function respondWith(promise, sendResponse) {
@@ -29,7 +27,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case MESSAGE.GET_SETTINGS:
         return { ok: true, settings: publicSettings(settings) };
       case MESSAGE.SAVE_SETTINGS: {
-        if (!extensionPage(sender)) return { ok: false, errorCode: "FORBIDDEN", userMessage: "Open FocusTube options to change provider settings." };
+        if (!extensionPage(sender)) return { ok: false, errorCode: "FORBIDDEN", userMessage: "Open FocusTube options to change preferences." };
         const updated = await saveSettings(message.payload || {});
         setDebug(updated.debugLogging);
         return { ok: true, settings: publicSettings(updated) };
@@ -44,17 +42,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case MESSAGE.RUN_PIPELINE:
         return runPipeline(message.payload || {}, settings, { cache, correlationId });
       case MESSAGE.TEST_LLM: {
-        if (!extensionPage(sender)) return { ok: false, errorCode: "FORBIDDEN", userMessage: "Use the FocusTube options page to test provider settings." };
         const client = new LlmClient(settings);
-        const data = await client.completeJson({ system: "Return valid JSON only.", user: "Return {\"ok\":true}.", model: settings.fastModel, maxTokens: 32, temperature: 0, correlationId });
-        return data?.ok === true ? { ok: true, message: "LLM connection succeeded." } : { ok: false, errorCode: "PARSE_ERROR", userMessage: "The LLM test response did not match the expected shape." };
+        return { ok: true, health: await client.health() };
       }
-      case MESSAGE.TEST_YOUTUBE_API: {
-        if (!extensionPage(sender)) return { ok: false, errorCode: "FORBIDDEN", userMessage: "Use the FocusTube options page to test your YouTube API key." };
-        const provider = new ApiProvider({ apiKey: settings.youtubeApiKey });
-        const videos = await provider.search("YouTube", { maxResults: 1 });
-        return { ok: true, message: `YouTube API connection succeeded (${videos.length} result).` };
-      }
+      case MESSAGE.BACKEND_HEALTH: return { ok: true, health: await new LlmClient(settings).health() };
       case MESSAGE.CLEAR_CACHE:
         if (!extensionPage(sender)) return { ok: false, errorCode: "FORBIDDEN", userMessage: "Use FocusTube options to clear its cache." };
         return { ok: true, cleared: await cache.clear() };
