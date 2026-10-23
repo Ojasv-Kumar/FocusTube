@@ -23,13 +23,14 @@ test("manifest targets and local JavaScript imports exist", () => {
 });
 
 test("content-script module imports are exposed as web-accessible resources", () => {
-  const resources = manifest.web_accessible_resources.flatMap(item => item.resources || []);
+  const resources = (manifest.web_accessible_resources || []).flatMap(item => item.resources || []);
   const covers = path => resources.some(pattern => {
     const glob = pattern.split("*").map(part => part.replace(/[|\\{}()[\]^$+?.]/g, "\\$&")).join(".*");
     const expression = new RegExp(`^${glob}$`);
     return expression.test(path);
   });
-  const sourceFiles = walk(join(root, "src/content")).filter(path => path.endsWith(".js"));
+  const entryNames = new Set(manifest.content_scripts.flatMap(item => item.js || []));
+  const sourceFiles = [...entryNames].map(path => join(root, path)).filter(path => path.endsWith(".js"));
   for (const file of sourceFiles) {
     const source = readFileSync(file, "utf8");
     const imports = [...source.matchAll(/(?:from\s*|import\s*)["'](\.[^"']+)["']/g)].map(match => match[1]);

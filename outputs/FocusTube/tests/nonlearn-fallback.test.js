@@ -25,9 +25,9 @@ function searchHtml(id = "robotics-video") {
 test("API-only preference falls back to YouTube HTML after API failure", async () => {
   const previousFetch = globalThis.fetch;
   globalThis.chrome = { storage: { local: new MemoryStorage() } };
-  globalThis.fetch = async url => String(url).includes("googleapis.com")
-    ? { ok: false, status: 403, json: async () => ({ error: { code: 403, errors: [{ reason: "keyInvalid" }] } }) }
-    : { ok: true, status: 200, text: async () => searchHtml() };
+  globalThis.fetch = async url => String(url).endsWith("/v1/youtube/api")
+    ? { ok: true, status: 200, json: async () => ({ ok: true, status: 403, data: { error: { code: 403, errors: [{ reason: "keyInvalid" }] } } }) }
+    : { ok: true, status: 200, json: async () => ({ ok: true, status: 200, html: searchHtml() }) };
   try {
     const { retrieveQueries } = await import("../src/background/retrieval/index.js");
     const result = await retrieveQueries(["robotics"], { retrievalProvider: "api", youtubeApiKey: "invalid-test-key" });
@@ -41,8 +41,8 @@ test("retrieval reports the exact failing source instead of blaming the AI backe
   const previousFetch = globalThis.fetch;
   globalThis.chrome = { storage: { local: new MemoryStorage() } };
   globalThis.fetch = async url => {
-    if (String(url).includes("googleapis.com")) {
-      return { ok: false, status: 403, json: async () => ({ error: { code: 403, errors: [{ reason: "keyInvalid" }] } }) };
+    if (String(url).endsWith("/v1/youtube/api")) {
+      return { ok: true, status: 200, json: async () => ({ ok: true, status: 403, data: { error: { code: 403, errors: [{ reason: "keyInvalid" }] } } }) };
     }
     throw new TypeError("Network request blocked");
   };
@@ -51,14 +51,14 @@ test("retrieval reports the exact failing source instead of blaming the AI backe
       import("../src/background/retrieval/index.js"), import("../src/errors.js")
     ]);
     const result = await retrieveQueries(["robotics"], { retrievalProvider: "api", youtubeApiKey: "invalid-test-key" });
-    assert.equal(result.error?.code, "YOUTUBE_HTML_FETCH_FAILED");
+    assert.equal(result.error?.code, "YOUTUBE_PROXY_UNAVAILABLE");
     assert.deepEqual(result.error?.providerFailures, [
       { provider: "api", code: "CONFIG_ERROR" },
-      { provider: "html", code: "YOUTUBE_HTML_FETCH_FAILED" }
+      { provider: "html", code: "YOUTUBE_PROXY_UNAVAILABLE" }
     ]);
     const mapped = friendlyError(result.error);
-    assert.match(mapped.userMessage, /could not fetch YouTube search/i);
-    assert.match(mapped.userMessage, /api: CONFIG_ERROR; html: YOUTUBE_HTML_FETCH_FAILED/);
+    assert.match(mapped.userMessage, /local YouTube retrieval proxy/i);
+    assert.match(mapped.userMessage, /api: CONFIG_ERROR; html: YOUTUBE_PROXY_UNAVAILABLE/);
     assert.doesNotMatch(mapped.userMessage, /local AI backend/);
   } finally { globalThis.fetch = previousFetch; }
 });
@@ -76,7 +76,7 @@ for (const mode of ["interest", "curiosity"]) {
         return { ok: true, status: 200, json: async () => [{ name: "PBS Space Time" }] };
       }
       if (String(url).includes("/v1/generate")) throw new TypeError("backend intentionally unavailable in this test");
-      return { ok: true, status: 200, text: async () => searchHtml() };
+      return { ok: true, status: 200, json: async () => ({ ok: true, status: 200, html: searchHtml() }) };
     };
     try {
       const [{ runPipeline }, { Cache }] = await Promise.all([

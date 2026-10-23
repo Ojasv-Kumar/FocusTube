@@ -72,6 +72,7 @@ test("query expansion always includes the original and removes duplicates", () =
 test("query normalization trims controls and preserves Unicode", () => {
   assert.equal(normalizeQuery("  हिंदी\tAI\u0000  "), "हिंदी AI");
   assert.equal(normalizeQuery("long".repeat(100), 12).length, 12);
+  assert.equal(normalizeQuery("a".repeat(239) + "😀z", 240).endsWith("😀"), true);
 });
 
 test("dedupe merges repeated IDs and near-identical titles", () => {
@@ -106,9 +107,12 @@ test("concurrent API calls do not overwrite each other's quota accounting", asyn
   const storage = new MemoryStorage();
   const api = new ApiProvider({ apiKey: "test", storage, fetchImpl: async () => {
     await new Promise(resolve => setTimeout(resolve, 2));
-    return { ok: true, status: 200, json: async () => ({ items: [] }) };
+    return { ok: true, status: 200, json: async () => ({ ok: true, status: 200, data: { items: [] } }) };
   } });
-  await Promise.all([api.request("mock-1", 1, "search"), api.request("mock-2", 1, "search")]);
+  await Promise.all([
+    api.request("https://www.googleapis.com/youtube/v3/search?q=robotics&maxResults=8", 1, "search"),
+    api.request("https://www.googleapis.com/youtube/v3/search?q=robotics+projects&maxResults=8", 1, "search")
+  ]);
   const usage = (await storage.get("focustube.apiQuota"))["focustube.apiQuota"];
   assert.equal(usage.searchCalls, 2);
   assert.equal(usage.searchUnits, 2);

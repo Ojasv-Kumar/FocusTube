@@ -44,6 +44,13 @@ async function checkBackendFromPopup() {
     const health = await response.json().catch(() => null);
     if (!response.ok) throw Object.assign(new Error(`HTTP_${response.status}`), { code: `HTTP_${response.status}` });
     if (!health?.ok) throw Object.assign(new Error("INVALID_HEALTH_RESPONSE"), { code: "INVALID_HEALTH_RESPONSE" });
+    if (Number(health.youtubeRetrievalProxy) < 1) {
+      backendNode.textContent = "Backend · Restart required";
+      backendNode.dataset.connected = "false";
+      backendNode.title = "This backend is an older version and does not include YouTube retrieval. Stop the old server and restart node backend/server.mjs from the updated FocusTube folder.";
+      connectBackendButton.hidden = true;
+      return;
+    }
     backendNode.dataset.connected = "true";
     if (!health.ollama?.reachable) {
       backendNode.textContent = "Backend · Connected (Ollama unavailable)";

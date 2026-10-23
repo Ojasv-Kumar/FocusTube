@@ -15,7 +15,6 @@ function quotaError(response) {
   if (reason === "keyInvalid" || reason === "accessNotConfigured" || response?.error?.code === 401) return new ConfigError("The YouTube API key is invalid or the Data API is not enabled.");
   return null;
 }
-async function readJson(response) { try { return await response.json(); } catch { throw new NetworkError("The YouTube API returned unreadable data."); } }
 let quotaRequestQueue = Promise.resolve();
 export class ApiProvider {
   constructor({ apiKey, storage = chrome.storage.local, fetchImpl = fetch }) { this.apiKey = apiKey; this.storage = storage; this.fetch = fetchImpl; }
@@ -33,12 +32,32 @@ export class ApiProvider {
     const delta = kind === "search" ? { searchCalls: 1, searchUnits: cost, otherUnits: 0 } : { searchCalls: 0, searchUnits: 0, otherUnits: cost };
     const limits = { searchCalls: CONFIG.Retrieval.apiDailySearchCalls, searchUnits: CONFIG.Retrieval.apiDailySearchUnits, otherUnits: CONFIG.Retrieval.apiDailyQuotaLimit };
     if (!canSpendQuota(usage, delta, limits)) throw new QuotaError("FocusTube's estimated YouTube API daily budget is exhausted.");
-    let response;
-    try { response = await this.fetch(url); } catch (cause) { throw new NetworkError("Could not reach the YouTube Data API.", { cause }); }
+    const requestUrl = new URL(url);
+    const body = {
+      kind,
+      apiKey: this.apiKey,
+      ...(kind === "search" ? {
+        query: requestUrl.searchParams.get("q") || "",
+        maxResults: Number(requestUrl.searchParams.get("maxResults")) || CONFIG.Pipeline.resultsPerQuery
+      } : { ids: (requestUrl.searchParams.get("id") || "").split(",").filter(Boolean) })
+    };
+    let response, proxyPayload;
+    try {
+      response = await this.fetch(`${CONFIG.Backend.baseUrl.replace(/\/+$/, "")}/v1/youtube/api`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
+      });
+      proxyPayload = await response.json();
+      if (!response.ok || !proxyPayload?.ok) throw new Error(`Local YouTube proxy returned HTTP ${response.status}.`);
+    } catch (cause) {
+      const error = new NetworkError("Could not reach the local FocusTube YouTube retrieval proxy.", { cause });
+      error.code = "YOUTUBE_PROXY_UNAVAILABLE";
+      throw error;
+    }
     // Count the attempted request even if its response body is malformed.
     await this.storage.set({ [quotaKey]: addQuotaUsage(usage, delta, today) });
-    const payload = await readJson(response);
-    if (!response.ok) throw quotaError(payload) || new NetworkError(`YouTube Data API returned HTTP ${response.status}.`);
+    const payload = proxyPayload.data;
+    if (proxyPayload.status < 200 || proxyPayload.status >= 300) throw quotaError({ ...payload, error: { ...payload?.error, code: payload?.error?.code || proxyPayload.status } }) || new NetworkError(`YouTube Data API returned HTTP ${proxyPayload.status}.`);
+    if (!payload || typeof payload !== "object") throw new NetworkError("The YouTube API returned unreadable data.");
     return payload;
   }
   async search(query, options = {}) {
@@ -47,7 +66,7 @@ export class ApiProvider {
     const ids = (search.items || []).map(item => item?.id?.videoId).filter(Boolean);
     if (!ids.length) return [];
     const videoParams = new URLSearchParams({ part: "snippet,contentDetails,statistics,liveStreamingDetails", id: ids.join(","), key: this.apiKey });
-    const details = await this.request(`https://www.googleapis.com/youtube/v3/videos?${videoParams}`, CONFIG.Retrieval.videosListCost, "other");
+    const details = await this.request(`https://www.googleapis.com/youtube/v3/videos?${videoParams}`, CONFIG.Retrieval.videosListCost, "videos");
     return (details.items || []).map(item => {
       const durationSeconds = parseIsoDuration(item?.contentDetails?.duration);
       return {

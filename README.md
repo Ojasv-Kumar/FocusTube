@@ -17,7 +17,7 @@ Unpacked extensions do not sync local edits or update themselves. Copy the lates
 
 ## Local AI backend
 
-The extension sends AI-provider requests only to the local service described in [backend/README.md](backend/README.md); Gemini keys stay in the ignored `backend/.env`. You can add an optional YouTube Data API key in extension Options under **Video search**. Auto retrieval uses the API when configured and falls back to YouTube search HTML; HTML-only retrieval needs no key. The backend binds to loopback, defaults to port `41731`, and uses Ollama for query expansion with Gemini fallback. Model names must come from Google AI Studio and be set in `backend/.env`.
+The extension sends AI and YouTube retrieval requests through the local service described in [backend/README.md](backend/README.md); Gemini keys stay in the ignored `backend/.env`. You can add an optional YouTube Data API key in extension Options under **Video search**. Auto retrieval uses the API when configured and falls back to YouTube search HTML; HTML-only retrieval needs no key. The backend binds to loopback, defaults to port `41731`, and uses Ollama for query expansion with Gemini fallback. Model names must come from Google AI Studio and be set in `backend/.env`.
 
 For an offline demo, enable **Mock mode** in Options. Fixtures cover `backpropagation`, `op amp basics`, and `recursion in python`, plus Interest and Curiosity home feeds. Mock mode makes no backend or retrieval requests.
 
@@ -32,7 +32,7 @@ The first-visit picker is mandatory when there is no tab choice and cannot be di
 
 ## Preferences
 
-Options includes ask-on-new-tab, default Interest, results count, Curiosity strictness, Learn Shorts/autoplay/comments, result reasons, density, YouTube retrieval source and optional API key, mock mode, debug logging, selector health, cache clearing, and reset. The YouTube key stays in local extension storage and is sent only to YouTube Data API requests from the extension service worker.
+Options includes ask-on-new-tab, default Interest, results count, Curiosity strictness, Learn Shorts/autoplay/comments, result reasons, density, YouTube retrieval source and optional API key, mock mode, debug logging, selector health, cache clearing, and reset. The YouTube key stays in local extension storage and is sent from the extension to the loopback backend, which forwards it to Google in a request header. The key is not written to backend logs or returned by health checks.
 
 ## Developer checks
 

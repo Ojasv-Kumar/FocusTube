@@ -38,6 +38,13 @@ async function requestJson(fetchImpl, url, options = {}, timeout = 15_000) {
   try { const response = await fetchImpl(url, { ...options, signal: controller.signal }); return { status: response.status, headers: response.headers, data: await response.json().catch(() => ({})) }; }
   finally { clearTimeout(timer); }
 }
+async function requestText(fetchImpl, url, options = {}, timeout = 15_000) {
+  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetchImpl(url, { ...options, signal: controller.signal });
+    return { status: response.status, headers: response.headers, text: await response.text() };
+  } finally { clearTimeout(timer); }
+}
 const getText = payload => payload?.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("") || "";
 function nextPacificMidnight(timestamp) {
   const fmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" });
@@ -62,6 +69,13 @@ export function createBackendServer({ config, fetchImpl = fetch, logger = consol
     const origin = req.headers.origin || "";
     if (origin.startsWith("chrome-extension://")) { res.setHeader("access-control-allow-origin", origin); res.setHeader("vary", "Origin"); }
     res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS"); res.setHeader("access-control-allow-headers", "content-type");
+    // Chromium can issue a Private Network Access preflight when an extension
+    // service worker posts to a loopback backend. The health check is a simple
+    // GET and can succeed even while these POSTs are rejected, which otherwise
+    // looks like "backend connected" beside a broken curated feed.
+    if (req.headers["access-control-request-private-network"] === "true") {
+      res.setHeader("access-control-allow-private-network", "true");
+    }
   }
   async function gemini(body, model) {
     let lastError = config.GEMINI_API_KEYS.length ? "KEYS_EXHAUSTED" : "NO_KEYS";
@@ -103,6 +117,28 @@ export function createBackendServer({ config, fetchImpl = fetch, logger = consol
     if (query) return { json: { queries: [query, `${query} explained`, `${query} examples`] }, provider: "deterministic", model: "local", usedFallback: true };
     return { errorCode: fast.errorCode || "PROVIDERS_UNAVAILABLE" };
   }
+  async function youtubeApi(body) {
+    if (!body || !["search", "videos"].includes(body.kind) || typeof body.apiKey !== "string" || !body.apiKey.trim()) return { status: 400, data: { error: { code: 400, message: "Missing API key or invalid request." } } };
+    const params = new URLSearchParams();
+    if (body.kind === "search") {
+      const query = String(body.query || "").trim().slice(0, 240);
+      if (!query) return { status: 400, data: { error: { code: 400, message: "Search query is required." } } };
+      params.set("part", "snippet"); params.set("type", "video"); params.set("q", query);
+      params.set("maxResults", String(Math.max(1, Math.min(25, Number(body.maxResults) || 8))));
+    } else {
+      const ids = Array.isArray(body.ids) ? body.ids.map(id => String(id)).filter(id => /^[\w-]{6,20}$/.test(id)).slice(0, 50) : [];
+      if (!ids.length) return { status: 200, data: { items: [] } };
+      params.set("part", "snippet,contentDetails,statistics,liveStreamingDetails"); params.set("id", ids.join(","));
+    }
+    try {
+      const result = await requestJson(fetchImpl, `https://www.googleapis.com/youtube/v3/${body.kind}?${params}`, {
+        headers: { "x-goog-api-key": body.apiKey.trim() }
+      }, timeout(config.YOUTUBE_TIMEOUT_MS, 15_000));
+      return { status: result.status, headers: result.headers, data: result.data };
+    } catch (error) {
+      return { status: error?.name === "AbortError" ? 504 : 502, data: { error: { code: 502, message: safeStatus(error) } } };
+    }
+  }
   async function geminiRoute(body, primary) {
     const first = await gemini(body, primary);
     if (first.text) return first;
@@ -138,7 +174,25 @@ export function createBackendServer({ config, fetchImpl = fetch, logger = consol
     if (req.method === "GET" && url.pathname === "/health") {
       let reachable = false, present = false;
       try { const result = await requestJson(fetchImpl, `${ollamaRoot}/api/tags`, {}, 1800); reachable = result.status < 400; present = (result.data.models || []).some(m => m.name === config.OLLAMA_MODEL || m.name?.startsWith(`${config.OLLAMA_MODEL}:`)); } catch { /* report unavailable */ }
-      reply(res, 200, { ok: true, geminiKeys: { configured: states.length, available: states.filter(s => !s.disabled && s.cooldownUntil <= now()).length }, ollama: { reachable, model: config.OLLAMA_MODEL, present } }); return;
+      reply(res, 200, { ok: true, youtubeRetrievalProxy: 1, geminiKeys: { configured: states.length, available: states.filter(s => !s.disabled && s.cooldownUntil <= now()).length }, ollama: { reachable, model: config.OLLAMA_MODEL, present } }); return;
+    }
+    if (req.method === "POST" && url.pathname === "/v1/youtube/html") {
+      try {
+        const input = await readBody(req, 4_000);
+        const query = String(input.query || "").trim().slice(0, 240);
+        if (!query) { reply(res, 400, { ok: false, errorCode: "INVALID_QUERY" }); return; }
+        const result = await requestText(fetchImpl, `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, { headers: { "user-agent": "Mozilla/5.0 FocusTube/1.0" } }, timeout(config.YOUTUBE_TIMEOUT_MS, 15_000));
+        reply(res, 200, { ok: result.status >= 200 && result.status < 300, status: result.status, html: result.text });
+      } catch (error) { reply(res, 502, { ok: false, errorCode: safeStatus(error) }); }
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/v1/youtube/api") {
+      try {
+        const result = await youtubeApi(await readBody(req, 16_000));
+        res.setHeader("retry-after", result.headers?.get?.("retry-after") || "");
+        reply(res, 200, { ok: true, status: result.status, data: result.data });
+      } catch (error) { reply(res, 400, { ok: false, errorCode: error.message === "BODY_TOO_LARGE" ? "BODY_TOO_LARGE" : "INVALID_REQUEST" }); }
+      return;
     }
     if (req.method === "POST" && url.pathname === "/v1/generate") {
       const ip = req.socket.remoteAddress || "local"; const minute = Math.floor(now() / 60_000); const rate = rates.get(ip);

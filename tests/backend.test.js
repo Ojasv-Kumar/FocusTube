@@ -46,7 +46,29 @@ test("invalid Gemini JSON is repaired once and request results are cached",async
 test("health never exposes keys and HTTP rejects oversized bodies",async()=>{
   const lines=[];await withBackend({config:config({GEMINI_API_KEYS:["private-key-value"]}),fetchImpl:async()=>{throw Error("offline");},logger:{info:s=>lines.push(s)}},async({root})=>{
     const health=await (await fetch(`${root}/health`)).json();assert.deepEqual(health.geminiKeys,{configured:1,available:1});assert.equal(JSON.stringify(health).includes("private-key-value"),false);
+    assert.equal(health.youtubeRetrievalProxy,1);
     const smoke=await fetch(`${root}/v1/generate`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(expansion)});const generated=await smoke.json();assert.equal(smoke.status,200);assert.equal(generated.provider,"deterministic");
     const large=await fetch(`${root}/v1/generate`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({x:"a".repeat(70_000)})});assert.equal(large.status,413);
   });assert.equal(lines.some(line=>line.includes("private-key-value")),false);
+});
+test("local backend proxies YouTube HTML and Data API requests without logging API keys",async()=>{
+  const seen=[];
+  const fetchImpl=async(url,options={})=>{
+    seen.push({url:String(url),key:options.headers?.["x-goog-api-key"]});
+    if(String(url).includes("youtube.com/results")) return {status:200,headers:new Headers(),text:async()=>"youtube-search-html"};
+    const data=String(url).includes("/search?")
+      ? {items:[{id:{videoId:"video-123"},snippet:{title:"Robotics"}}]}
+      : {items:[{id:"video-123",contentDetails:{duration:"PT5M"}}]};
+    return {status:200,headers:new Headers(),json:async()=>data};
+  };
+  await withBackend({config:config(),fetchImpl,logger:{info(){}}},async({root})=>{
+    const preflight=await fetch(`${root}/v1/youtube/html`,{method:"OPTIONS",headers:{origin:"chrome-extension://test-extension", "access-control-request-method":"POST", "access-control-request-headers":"content-type", "access-control-request-private-network":"true"}});
+    assert.equal(preflight.status,204);assert.equal(preflight.headers.get("access-control-allow-origin"),"chrome-extension://test-extension");assert.equal(preflight.headers.get("access-control-allow-private-network"),"true");
+    const html=await fetch(`${root}/v1/youtube/html`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({query:"robotics"})});
+    const htmlData=await html.json();assert.equal(htmlData.ok,true);assert.equal(htmlData.html,"youtube-search-html");
+    const api=await fetch(`${root}/v1/youtube/api`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({kind:"search",query:"robotics",maxResults:8,apiKey:"private-youtube-key"})});
+    const apiData=await api.json();assert.equal(apiData.status,200);assert.equal(apiData.data.items[0].id.videoId,"video-123");
+    assert.equal(seen.some(item=>item.key==="private-youtube-key"),true);
+    assert.equal(JSON.stringify(apiData).includes("private-youtube-key"),false);
+  });
 });

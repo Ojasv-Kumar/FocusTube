@@ -69,20 +69,34 @@ export function normalizeRenderer(renderer) {
 export class HtmlProvider {
   constructor({ fetchImpl = fetch } = {}) { this.fetch = fetchImpl; }
   async search(query, options = {}) {
-    const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+    const url = `${CONFIG.Backend.baseUrl.replace(/\/+$/, "")}/v1/youtube/html`;
     let response;
-    try { response = await this.fetch(url, { credentials: "include", redirect: "follow" }); }
+    try { response = await this.fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query }) }); }
     catch (cause) {
-      const error = new NetworkError("Could not retrieve YouTube search HTML.", { cause });
-      error.code = "YOUTUBE_HTML_FETCH_FAILED";
+      const error = new NetworkError("Could not reach the local FocusTube YouTube retrieval proxy.", { cause });
+      error.code = "YOUTUBE_PROXY_UNAVAILABLE";
       throw error;
     }
-    if (!response.ok) {
-      const error = new NetworkError(`YouTube returned HTTP ${response.status}.`);
-      error.code = `YOUTUBE_HTML_HTTP_${response.status}`;
+    let payload;
+    try { payload = await response.json(); }
+    catch {
+      const error = new NetworkError("The local FocusTube proxy returned unreadable YouTube data.");
+      error.code = "YOUTUBE_HTML_PROXY_INVALID";
       throw error;
     }
-    const html = await response.text();
+    if (!response.ok || !payload?.ok) {
+      const error = new NetworkError(`YouTube retrieval proxy failed (${payload?.errorCode || response.status}).`);
+      error.code = payload?.errorCode === "UPSTREAM_TIMEOUT" ? "YOUTUBE_HTML_TIMEOUT"
+        : payload?.errorCode === "UPSTREAM_ERROR" ? "YOUTUBE_HTML_UPSTREAM_UNAVAILABLE"
+          : `YOUTUBE_HTML_HTTP_${payload?.status || response.status}`;
+      throw error;
+    }
+    if (payload.status < 200 || payload.status >= 300) {
+      const error = new NetworkError(`YouTube returned HTTP ${payload.status}.`);
+      error.code = `YOUTUBE_HTML_HTTP_${payload.status}`;
+      throw error;
+    }
+    const html = String(payload.html || "");
     if (/captcha|consent\.youtube|before you continue|unusual traffic/i.test(html.slice(0, 100_000))) {
       const error = new NetworkError("YouTube showed a consent or verification page; HTML retrieval is unavailable.");
       error.code = "YOUTUBE_CONSENT_REQUIRED";
