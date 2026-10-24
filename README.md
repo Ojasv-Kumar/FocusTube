@@ -1,77 +1,56 @@
 # FocusTube
 
-FocusTube is a no-build Chrome Manifest V3 extension for YouTube. Learn, Interest, and Curiosity make YouTube calmer and more useful; Relax restores the native page. The highest-priority flow is a guided Learn search: expand a topic into learning angles, retrieve YouTube candidates, ask the local backend to rank them, and show inline grouped picks with reasons and a native-results recovery path.
+FocusTube is a no-build Chrome Manifest V3 extension that makes YouTube more intentional. Learn, Interest, and Curiosity retrieve and curate videos; Relax restores normal YouTube behavior. AI and search requests run directly from the extension. There is no FocusTube server, Node process, or Ollama dependency.
 
-## Load the unpacked extension
+## Install or update
 
-1. Open `chrome://extensions` and turn on **Developer mode**.
-2. Choose **Load unpacked** and select this project folder, the one containing the root `manifest.json` (not an individual `src` folder).
-3. Reload the extension after code changes, then refresh open YouTube tabs.
-4. Open the FocusTube popup to switch modes. Use Options for preferences and mock mode.
+1. Open `chrome://extensions` and enable **Developer mode**.
+2. Choose **Load unpacked** and select this project folder, the one containing this root `manifest.json`.
+3. After changing files, click the extension's **Reload** button, approve the added scripting permission if prompted, and refresh each YouTube tab.
+4. Open FocusTube **Options**, enter a Gemini API key, and click **Test Gemini connection**. Set the fast and smart models to a model enabled for your key. They may be the same model.
+5. Optionally add a YouTube Data API key in **Video search**. Without it, FocusTube retrieves candidates from YouTube's public search page using the open YouTube tab, then falls back to the extension worker request if needed.
+6. Use the FocusTube toolbar popup to choose a mode. Switching modes updates open YouTube tabs without reloading.
 
-The extension uses only vanilla JavaScript, HTML, CSS, and Chrome APIs. No build or npm install is required.
-
-### Updating on another computer
-
-Unpacked extensions do not sync local edits or update themselves. Copy the latest project folder to each computer, open `chrome://extensions`, and use **Load unpacked** on the folder containing `manifest.json`; for an existing install, use its **Reload** button and refresh YouTube tabs. The local AI backend is separate: each computer using AI curation must run Node/Ollama and its own `backend/.env` on that same computer. Do not include `.env` in a shared extension package.
-
-## Local AI backend
-
-The extension sends AI and YouTube retrieval requests through the local service described in [backend/README.md](backend/README.md); Gemini keys stay in the ignored `backend/.env`. You can add an optional YouTube Data API key in extension Options under **Video search**. Auto retrieval uses the API when configured and falls back to YouTube search HTML; HTML-only retrieval needs no key. The backend binds to loopback, defaults to port `41731`, and uses Ollama for query expansion with Gemini fallback. Model names must come from Google AI Studio and be set in `backend/.env`.
-
-For an offline demo, enable **Mock mode** in Options. Fixtures cover `backpropagation`, `op amp basics`, and `recursion in python`, plus Interest and Curiosity home feeds. Mock mode makes no backend or retrieval requests.
+Use the same project folder on every computer. Unpacked extension files and API keys do not sync between computers: copy the latest folder, select **Load unpacked** (or update the existing unpacked folder and click **Reload**) and configure keys in that browser profile. Keep the folder private because Gemini keys are stored in local extension storage and sent directly to Google.
 
 ## Modes
 
-- **Learn:** focused home prompt, custom masthead search, hidden native video cards while curation loads, inline grouped results with short reasons, optional comments, Shorts suppression, and autoplay control.
-- **Interest:** a feed of topic videos, separate suggested-channel section, and interest-aware ranking. The topic is remembered and can be changed in Options or the popup.
-- **Curiosity:** broad video discovery scored for informational substance and sensationalism. Filtering strictness is configurable and wording stays neutral.
-- **Relax:** native YouTube behavior without FocusTube styles, attributes, floating UI, mutation observers, or retrieval calls. The popup can still switch out of Relax.
+- **Learn:** replace the home feed with a learning prompt; expand a query into learning angles; group selected videos by role and explain each pick. Native YouTube results remain available when retrieval or Gemini fails.
+- **Interest:** remember one interest; build a related home feed, suggest channels separately, and rank search results within that interest.
+- **Curiosity:** discover broadly and rank for informational substance with neutral language.
+- **Relax:** leave YouTube unchanged; the popup remains available for switching.
 
-The first-visit picker is mandatory when there is no tab choice and cannot be dismissed without selecting a mode. Switching modes from the popup updates open YouTube tabs without a reload.
+If Gemini is down, Interest and Curiosity label their retrieved candidates as unranked. If YouTube or Gemini cannot be reached, the extension offers retry and a route back to original YouTube. Enable **Mock mode** in Options to demo offline; bundled fixtures cover backpropagation, op amp basics, recursion in Python, and home feeds.
 
 ## Preferences
 
-Options includes ask-on-new-tab, default Interest, results count, Curiosity strictness, Learn Shorts/autoplay/comments, result reasons, density, YouTube retrieval source and optional API key, mock mode, debug logging, selector health, cache clearing, and reset. The YouTube key stays in local extension storage and is sent from the extension to the loopback backend, which forwards it to Google in a request header. The key is not written to backend logs or returned by health checks.
+Options contains Gemini keys (comma, semicolon, or newline separated), fast/smart model names, optional fallback model names, optional YouTube Data API key, retrieval preference, mode behavior, mock mode, diagnostics, and cache controls. YouTube API retrieval falls back to direct public HTML search if the API key is missing, invalid, or out of quota. The YouTube key is optional.
 
-## Developer checks
+Gemini's API key is sent in the `x-goog-api-key` request header from the extension service worker. The YouTube Data API key is included in Google's documented `key` query parameter. FocusTube does not send keys to its own server because it has no server. Do not share your configured browser profile or extension folder containing keys.
 
-Run the dependency-free checks with:
+## Checks
+
+Run the dependency-free test suite with:
 
 ```sh
 node --test
 ```
 
-Check the backend independently with:
+Offline UI preview: open [dev/preview.html](dev/preview.html). It demonstrates representative picker, search, results, feed, popup, preferences, loading, empty, and error states.
 
-```sh
-node --test tests/backend.test.js
-node backend/server.mjs
-```
+## Manual verification
 
-Offline UI preview: open [dev/preview.html](dev/preview.html) in a browser. It uses the shared design tokens and demonstrates representative picker, search, results, feed, popup, preferences, loading, empty, and error states.
+Automated tests use fake Gemini and YouTube responses. They do not validate your API key, network/VPN policy, current YouTube DOM, browser-specific host permission state, playback, or visual layout. In Chrome, verify:
 
-## Manual verification checklist
+- [ ] Reload this folder in `chrome://extensions`, then refresh YouTube.
+- [ ] Open Options, save a Gemini key and model, then use **Test Gemini connection**.
+- [ ] Choose Learn and search a specific topic; confirm grouped videos and reasons, then use the original-results fallback.
+- [ ] Choose Interest, set an interest, refresh the home feed, and search; confirm channel suggestions and labeled graceful fallback if AI is unavailable.
+- [ ] Choose Curiosity, refresh/search, and check neutral substance-oriented ordering.
+- [ ] Switch all four modes from the popup without reloading; verify Relax restores native YouTube.
+- [ ] Try with and without a YouTube Data API key; HTML search should be attempted as a fallback.
+- [ ] Test home, watch, search, and Shorts routes, plus narrow and wide windows.
 
-These checks require live YouTube in Chrome and are not represented as passed by the automated suite:
+## Known limitations
 
-- [ ] Load this folder unpacked; hard-refresh YouTube home and confirm no page flash under the picker.
-- [ ] Repeat the hard refresh on a `/shorts/` URL and a `/watch` URL; confirm media stays paused until a choice.
-- [ ] Click outside the required picker and press Escape; it must remain until a mode is chosen. Test Interest → Back.
-- [ ] Choose Relax; confirm YouTube is native and FocusTube injects no UI or mode attributes. Switch out using popup.
-- [ ] In Learn, confirm Subscriptions, notification bell, Shorts, Trending, and watch recommendations are hidden as configured.
-- [ ] Confirm Learn's custom masthead search pre-fills on results pages and handles empty, long, Unicode, and special-character queries.
-- [ ] Search in Learn, Interest, and Curiosity; confirm result cards appear inline in the results area and original results return on failure.
-- [ ] Stop the backend and search; confirm native results return with an inline dismissible notice and Retry.
-- [ ] Inspect filter chips and card layout at widths 800, 1024, 1280, and 1440 px with YouTube's sidebar expanded and collapsed.
-- [ ] Change every Options preference and verify the corresponding behavior; check popup switching from all four modes and backend health status.
-- [ ] Verify autoplay, comments, channel suggestions, and Curiosity strictness on current YouTube pages.
-
-## Known weaknesses and unconfirmed selectors
-
-- This task run has not been exercised in a live Chrome/YouTube browser. YouTube's private DOM changes frequently; the masthead, result renderer, filter chips, subscriptions/mini-guide, notification bell, autoplay, end-screen, comments, and Shorts selectors need the manual checks above.
-- HTML retrieval parses YouTube's undocumented search response and can fail on consent, captcha, locale, or page changes. On failure the UI should preserve native results.
-- AI scores use supplied metadata only; FocusTube does not watch videos. Use native results when picks are not useful.
-- Backend provider behavior is covered with fake local upstream tests, not real Google AI Studio or Ollama credentials in this environment.
-
-See [ASSUMPTIONS.md](ASSUMPTIONS.md) for implementation choices and [DEBUGGING.md](DEBUGGING.md) for recovery steps.
+YouTube HTML search parsing uses undocumented page data and can fail on consent checks, network restrictions, or YouTube page changes. The extension retains original YouTube results as a recovery path. AI ranking uses video metadata and descriptions; FocusTube does not watch videos or verify their teaching quality. Google API model availability and quota depend on the key's project and current Google policy.

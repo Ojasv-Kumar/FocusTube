@@ -5,7 +5,7 @@ import { normalizeQuery } from "../src/utils.js";
 import { extractJson, validateLearnJudge, validateQueries } from "../src/background/validators.js";
 import { ApiProvider, parseIsoDuration } from "../src/background/retrieval/api-provider.js";
 import { parseClockDuration, parseViewCount, normalizeRenderer } from "../src/background/retrieval/html-provider.js";
-import { mergeVideos } from "../src/background/retrieval/index.js";
+import { mergeVideos, interleaveQueryResults } from "../src/background/retrieval/index.js";
 import { Cache } from "../src/background/cache.js";
 import { addQuotaUsage, canSpendQuota, pacificDateKey } from "../src/background/quota.js";
 import { pageTypeFromUrl, makeHideCss } from "../src/selectors.js";
@@ -72,12 +72,22 @@ test("query expansion always includes the original and removes duplicates", () =
 test("query normalization trims controls and preserves Unicode", () => {
   assert.equal(normalizeQuery("  हिंदी\tAI\u0000  "), "हिंदी AI");
   assert.equal(normalizeQuery("long".repeat(100), 12).length, 12);
+  assert.equal(normalizeQuery("a".repeat(239) + "😀z", 240).endsWith("😀"), true);
 });
 
 test("dedupe merges repeated IDs and near-identical titles", () => {
   const result = mergeVideos([[{ id: "a", title: "Visual Guide to Gradient Descent", description: "" }, { id: "a", title: "Visual Guide to Gradient Descent", description: "A longer description" }, { id: "b", title: "Visual Guide to Gradient Descent", description: "duplicate" }, { id: "c", title: "An unrelated history of Rome", description: "" }]], 0.88);
   assert.equal(result.length, 2);
   assert.equal(result[0].description, "A longer description");
+});
+
+test("query result groups are interleaved so one source cannot fill the feed first", () => {
+  const result = interleaveQueryResults([
+    [{ id: "channel-a-1", title: "Robotics assembly tutorial", channelName: "Channel A" }, { id: "channel-a-2", title: "Circuit design practical guide", channelName: "Channel A" }],
+    [{ id: "topic-b-1", title: "Medieval trade route documentary", channelName: "Channel B" }, { id: "topic-b-2", title: "Marine biology field research", channelName: "Channel B" }],
+    [{ id: "topic-c-1", title: "Modern architecture history", channelName: "Channel C" }]
+  ]);
+  assert.deepEqual(result.map(video => video.id), ["channel-a-1", "topic-b-1", "topic-c-1", "channel-a-2", "topic-b-2"]);
 });
 
 test("cache honors TTL and evicts the oldest entry", async () => {
@@ -108,7 +118,10 @@ test("concurrent API calls do not overwrite each other's quota accounting", asyn
     await new Promise(resolve => setTimeout(resolve, 2));
     return { ok: true, status: 200, json: async () => ({ items: [] }) };
   } });
-  await Promise.all([api.request("mock-1", 1, "search"), api.request("mock-2", 1, "search")]);
+  await Promise.all([
+    api.request("search", { part: "snippet", type: "video", q: "robotics", maxResults: 8 }, 1),
+    api.request("search", { part: "snippet", type: "video", q: "robotics projects", maxResults: 8 }, 1)
+  ]);
   const usage = (await storage.get("focustube.apiQuota"))["focustube.apiQuota"];
   assert.equal(usage.searchCalls, 2);
   assert.equal(usage.searchUnits, 2);

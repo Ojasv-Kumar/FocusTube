@@ -1,12 +1,12 @@
 /* All product tuning lives here. Keep units and safe ranges beside each value. */
 export const CONFIG = Object.freeze({
-  Backend: { baseUrl: "http://127.0.0.1:41731", healthTimeoutMs: 6000, requestTimeoutMs: 30_000, maxRetries: 1, retryDelayMs: 350, enabled: true },
   LLM: {
-    fastModel: "backend-managed",
-    smartModel: "backend-managed",
-    timeoutMs: 25_000, // 1,000..120,000 ms
-    maxRetries: 2, // 0..5 retries after the first attempt
-    backoffBaseMs: 500, // 100..10,000 ms
+    apiBaseUrl: "https://generativelanguage.googleapis.com/v1beta/models",
+    fastModel: "gemini-3.8-flash",
+    smartModel: "gemini-3.8-flash",
+    fallbackModels: [],
+    timeoutMs: 45_000,
+    retriesPerKey: 1,
     maxOutputTokens: { expansion: 500, judge: 1800, repair: 1800, test: 32 },
     temperature: { expansion: 0.2, judge: 0.1, repair: 0, test: 0 },
     repairOutputMaxChars: 12_000,
@@ -35,7 +35,10 @@ export const CONFIG = Object.freeze({
     interestFallbackQueries: 4, // 1..8 comma-separated fallback searches
     curiositySeedChannelsPerFeed: 6, // 1..40 channel searches per refresh
     curiosityMaximumSensationalScore: 0.75, // 0..1; higher scores are filtered
-    curiosityTopicQueries: ["science explained", "engineering projects", "history documentary", "mathematics visual explanation"],
+    curiosityTopicQueries: [
+      "science experiment explained", "engineering project build explained", "history of an ancient civilization documentary", "mathematics idea visual explanation",
+      "wildlife behavior nature documentary", "architecture design explained", "economics everyday life explained", "technology invention history documentary"
+    ],
     demoQueries: ["backpropagation", "op amp basics", "recursion in python"]
   },
   Cache: {

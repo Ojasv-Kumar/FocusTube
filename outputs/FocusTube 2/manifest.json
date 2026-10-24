@@ -1,14 +1,21 @@
 {
   "manifest_version": 3,
   "name": "FocusTube",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Make YouTube intentional, useful, and calm.",
-  "permissions": ["storage", "activeTab", "tabs"],
+  "permissions": [
+    "storage",
+    "activeTab",
+    "tabs",
+    "scripting"
+  ],
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://www.googleapis.com/*"
   ],
-  "optional_host_permissions": ["http://127.0.0.1/*"],
+  "optional_host_permissions": [
+    "https://generativelanguage.googleapis.com/*"
+  ],
   "background": {
     "service_worker": "src/background/service-worker.js",
     "type": "module"
@@ -23,9 +30,16 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.youtube.com/*"],
-      "js": ["src/content/loader.js", "src/content/focustube.bundle.js"],
-      "css": ["src/content/hide.css"],
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "src/content/loader.js",
+        "src/content/focustube.bundle.js"
+      ],
+      "css": [
+        "src/content/hide.css"
+      ],
       "run_at": "document_start"
     }
   ]

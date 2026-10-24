@@ -12,18 +12,29 @@ export class CancelledError extends FocusTubeError { constructor(message = "This
 export function friendlyError(error) {
   const code = error?.code || "UNKNOWN_ERROR";
   const messages = {
-    NETWORK_ERROR: "Could not connect to FocusTube's local backend. Start it, then retry or use native YouTube results.",
+    NETWORK_ERROR: error?.message ? `A network request failed before an HTTP response: ${error.message}` : "A network request failed. Check the service named in FocusTube's diagnostics, then retry or show original YouTube results.",
+    MISSING_GEMINI_HOST_PERMISSION: error?.message || "Allow FocusTube to contact Google's Gemini API in the browser's extension permission prompt.",
+    YOUTUBE_API_UNAVAILABLE: "YouTube Data API retrieval failed. FocusTube tried the HTML fallback too; check the API key or choose HTML retrieval, then retry.",
+    YOUTUBE_HTML_FETCH_FAILED: "FocusTube could not fetch YouTube search. Check this browser's connection, VPN, or network filtering, then retry or show original results.",
+    YOUTUBE_CONSENT_REQUIRED: "YouTube is asking this browser to confirm consent or verify traffic. Open YouTube normally, complete any prompt, then retry FocusTube.",
+    YOUTUBE_HTML_PARSE_FAILED: "YouTube returned a search page FocusTube could not read. Use the YouTube API in Options or show original YouTube results.",
     QUOTA_ERROR: "The optional YouTube API provider is disabled. Use native YouTube results or the HTML retrieval fallback.",
-    LLM_ERROR: "AI curation is unavailable. Retry after the local backend recovers or use native YouTube results.",
+    LLM_ERROR: "Gemini could not complete this request. Check the Gemini keys and model names in FocusTube Options, then retry.",
     PARSE_ERROR: "The AI response could not be understood. You can retry or show original results.",
-    CONFIG_ERROR: error?.message || "Check FocusTube's local backend configuration.",
+    CONFIG_ERROR: error?.message || "Check FocusTube's API keys and model settings in Options.",
     TIMEOUT_ERROR: "The request took too long. You can retry or show original results.",
     CANCELLED: "This request was replaced by a newer action.",
-    BAD_KEY: "The configured AI provider rejected a key. Check the local backend settings.",
+    BAD_KEY: "Gemini rejected a configured key. Check the key in FocusTube Options.",
     RATE_LIMITED: "The configured AI provider is rate limiting requests. Wait a moment and retry.",
     PROVIDER_DOWN: "The configured AI provider is temporarily unavailable. Try again shortly.",
-    PERMISSION_DENIED: "FocusTube could not reach the local backend. Check its loopback address and host permission.",
+    PERMISSION_DENIED: "FocusTube cannot access the configured API. Check extension host permissions and the browser network policy.",
     EMPTY_RESULTS: "No useful videos were found. Try a broader search or show original results."
   };
-  return { errorCode: code, userMessage: messages[code] || "FocusTube hit a problem. You can retry or return to YouTube results." };
+  let userMessage = messages[code] || "FocusTube hit a problem. You can retry or return to YouTube results.";
+  const failures = error?.providerFailures;
+  if (Array.isArray(failures) && failures.length) {
+    const detail = [...new Set(failures.map(item => `${item.provider}: ${item.code}`))].join("; ");
+    userMessage += ` Retrieval attempts: ${detail}.`;
+  }
+  return { errorCode: code, userMessage };
 }

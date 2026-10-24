@@ -1,14 +1,11 @@
-# Assumptions and implementation decisions
+# FocusTube implementation notes
 
-1. One saved mode and Interest topic apply across open YouTube tabs. When ask-on-new-tab is enabled, each new tab presents the required choice picker once per tab session.
-2. The Manifest V3 content-script entry is a classic document-start bootstrap followed by a prebuilt local IIFE bundle. It gates the YouTube app and media without importing extension modules or stylesheets from the YouTube page origin; the unpacked folder is ready to load without a build step.
-3. Relax removes FocusTube-owned UI, styles, and attributes and does not start the SPA MutationObserver or retrieval pipeline. A Chrome storage listener remains so a popup mode change can activate another mode without reloading.
-4. The service worker talks only to the loopback backend. Provider keys are stored in `backend/.env`, which is ignored by Git. The extension exposes no provider-key inputs and contains no direct AI API call.
-5. The backend defaults to HTML retrieval in the extension and uses Gemini model names explicitly configured from Google AI Studio. Ollama is the first query-expansion provider, Gemini fast is the backup, and deterministic query variants are the final fallback.
-6. API-based YouTube retrieval remains in the source for the documented disabled provider path, but `CONFIG.Retrieval.apiProviderEnabled` is false and no end-user YouTube API key exists.
-7. YouTube selectors and embedded search data are undocumented. They are centralized in `src/selectors.js` and `src/background/retrieval/html-provider.js`; the bundled automated tests cannot prove they match current live pages.
-8. Search replacement hides individual video renderers rather than YouTube's `#contents` or layout containers. The FocusTube results host is a normal-flow block with bounded width, `min-width: 0`, border-box sizing, and clipped overflow. Live viewport checks remain outstanding.
-9. Eligible vertical/square Shorts cannot be inferred reliably from HTML metadata. The default minimum duration is a conservative proxy, while `/shorts/` routes are redirected to the watch page in focus modes.
-10. Interest channel suggestions are names-only search links. IDs are not inferred or fabricated.
-11. Mock mode uses bundled fixtures only. Unsupported Learn queries return an explicit empty-fixture state rather than unrelated videos.
-12. Backend tests use fake loopback upstreams; live credentials and real upstream model availability have not been validated during this run.
+1. The project root containing `manifest.json` is the canonical Load unpacked folder.
+2. The extension stores provider keys in local extension storage and sends requests from its service worker directly to Gemini and Google APIs. No FocusTube backend, account, analytics, or Ollama is used.
+3. A Gemini API key and an available fast/smart model are required for AI ranking. Fast and smart can be the same model; model fallbacks and additional keys are optional.
+4. The YouTube Data API key is optional. Retrieval tries the configured source and falls back to public YouTube HTML search.
+5. When ranking fails, Interest and Curiosity show labeled unranked results if retrieval succeeded. Learn restores native YouTube results on curation failure.
+6. Mock mode reads bundled fixtures and makes no upstream requests.
+7. YouTube search HTML and DOM selectors are undocumented and may change; user-visible recovery keeps native YouTube accessible.
+8. Eligible vertical/square Shorts cannot be reliably inferred from HTML metadata. Duration and `/shorts/` route handling are conservative heuristics.
+9. AI judges supplied metadata and descriptions only; it does not watch videos or guarantee factual accuracy.

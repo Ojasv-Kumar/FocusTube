@@ -5,7 +5,7 @@ import { normalizeQuery } from "../src/utils.js";
 import { extractJson, validateLearnJudge, validateQueries } from "../src/background/validators.js";
 import { ApiProvider, parseIsoDuration } from "../src/background/retrieval/api-provider.js";
 import { parseClockDuration, parseViewCount, normalizeRenderer } from "../src/background/retrieval/html-provider.js";
-import { mergeVideos } from "../src/background/retrieval/index.js";
+import { mergeVideos, interleaveQueryResults } from "../src/background/retrieval/index.js";
 import { Cache } from "../src/background/cache.js";
 import { addQuotaUsage, canSpendQuota, pacificDateKey } from "../src/background/quota.js";
 import { pageTypeFromUrl, makeHideCss } from "../src/selectors.js";
@@ -81,6 +81,15 @@ test("dedupe merges repeated IDs and near-identical titles", () => {
   assert.equal(result[0].description, "A longer description");
 });
 
+test("query result groups are interleaved so one source cannot fill the feed first", () => {
+  const result = interleaveQueryResults([
+    [{ id: "channel-a-1", title: "Robotics assembly tutorial", channelName: "Channel A" }, { id: "channel-a-2", title: "Circuit design practical guide", channelName: "Channel A" }],
+    [{ id: "topic-b-1", title: "Medieval trade route documentary", channelName: "Channel B" }, { id: "topic-b-2", title: "Marine biology field research", channelName: "Channel B" }],
+    [{ id: "topic-c-1", title: "Modern architecture history", channelName: "Channel C" }]
+  ]);
+  assert.deepEqual(result.map(video => video.id), ["channel-a-1", "topic-b-1", "topic-c-1", "channel-a-2", "topic-b-2"]);
+});
+
 test("cache honors TTL and evicts the oldest entry", async () => {
   const storage = new MemoryStorage();
   let now = 100;
@@ -107,11 +116,11 @@ test("concurrent API calls do not overwrite each other's quota accounting", asyn
   const storage = new MemoryStorage();
   const api = new ApiProvider({ apiKey: "test", storage, fetchImpl: async () => {
     await new Promise(resolve => setTimeout(resolve, 2));
-    return { ok: true, status: 200, json: async () => ({ ok: true, status: 200, data: { items: [] } }) };
+    return { ok: true, status: 200, json: async () => ({ items: [] }) };
   } });
   await Promise.all([
-    api.request("https://www.googleapis.com/youtube/v3/search?q=robotics&maxResults=8", 1, "search"),
-    api.request("https://www.googleapis.com/youtube/v3/search?q=robotics+projects&maxResults=8", 1, "search")
+    api.request("search", { part: "snippet", type: "video", q: "robotics", maxResults: 8 }, 1),
+    api.request("search", { part: "snippet", type: "video", q: "robotics projects", maxResults: 8 }, 1)
   ]);
   const usage = (await storage.get("focustube.apiQuota"))["focustube.apiQuota"];
   assert.equal(usage.searchCalls, 2);

@@ -1,7 +1,7 @@
 export const MESSAGE = Object.freeze({
   GET_SETTINGS: "GET_SETTINGS", SAVE_SETTINGS: "SAVE_SETTINGS", SET_MODE: "SET_MODE",
   RUN_PIPELINE: "RUN_PIPELINE", TEST_LLM: "TEST_LLM", TEST_YOUTUBE_API: "TEST_YOUTUBE_API",
-  CLEAR_CACHE: "CLEAR_CACHE", PREWARM: "PREWARM", SELECTOR_HEALTH: "SELECTOR_HEALTH", BACKEND_HEALTH: "BACKEND_HEALTH"
+  CLEAR_CACHE: "CLEAR_CACHE", PREWARM: "PREWARM", SELECTOR_HEALTH: "SELECTOR_HEALTH", GEMINI_HEALTH: "GEMINI_HEALTH"
 });
 export function makeRequest(type, payload = {}, correlationId = "") { return { namespace: "focustube", type, payload, correlationId }; }
 export function isFocusTubeMessage(message) { return message?.namespace === "focustube" && Object.values(MESSAGE).includes(message.type); }

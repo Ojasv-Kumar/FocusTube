@@ -1,11 +1,13 @@
 (() => {
   // src/config.js
   var CONFIG = Object.freeze({
-    Backend: { baseUrl: "http://127.0.0.1:41731", healthTimeoutMs: 6e3, requestTimeoutMs: 3e4, maxRetries: 1, retryDelayMs: 350, enabled: true },
     LLM: {
-      fastModel: "backend-managed",
-      smartModel: "backend-managed",
-      timeoutMs: 25e3,
+      apiBaseUrl: "https://generativelanguage.googleapis.com/v1beta/models",
+      fastModel: "gemini-3.8-flash",
+      smartModel: "gemini-3.8-flash",
+      fallbackModels: [],
+      timeoutMs: 45e3,
+      retriesPerKey: 1,
       // 1,000..120,000 ms
       maxRetries: 2,
       // 0..5 retries after the first attempt
@@ -103,6 +105,10 @@
     activeMode: null,
     interestText: CONFIG.Settings.defaultInterestTopic,
     youtubeApiKey: "",
+    geminiApiKeys: "",
+    geminiFastModel: CONFIG.LLM.fastModel,
+    geminiSmartModel: CONFIG.LLM.smartModel,
+    geminiFallbackModels: "",
     retrievalProvider: CONFIG.Retrieval.defaultProvider,
     askForModeEveryTab: CONFIG.Settings.askForModeEveryTab,
     keepCommentsVisible: CONFIG.Settings.keepCommentsVisible,
@@ -128,7 +134,7 @@
     CLEAR_CACHE: "CLEAR_CACHE",
     PREWARM: "PREWARM",
     SELECTOR_HEALTH: "SELECTOR_HEALTH",
-    BACKEND_HEALTH: "BACKEND_HEALTH"
+    GEMINI_HEALTH: "GEMINI_HEALTH"
   });
   function makeRequest(type, payload = {}, correlationId = "") {
     return { namespace: "focustube", type, payload, correlationId };

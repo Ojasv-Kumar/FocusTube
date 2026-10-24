@@ -24,13 +24,23 @@ export function mergeVideos(groups, nearDuplicateThreshold = CONFIG.Pipeline.nea
   }
   return output;
 }
-export function selectProvider(settings, { apiKey = settings.youtubeApiKey } = {}) {
-  const html = new HtmlProvider();
+export function interleaveQueryResults(groups) {
+  const mixed = [];
+  const maxLength = Math.max(0, ...groups.map(group => group?.length || 0));
+  for (let index = 0; index < maxLength; index += 1) {
+    for (const group of groups) if (group?.[index]) mixed.push(group[index]);
+  }
+  return mergeVideos([mixed]);
+}
+export function selectProvider(settings, { apiKey = settings.youtubeApiKey, htmlFetchImpl = fetch } = {}) {
+  const html = new HtmlProvider({ fetchImpl: htmlFetchImpl });
   const api = () => new ApiProvider({ apiKey });
   if (!CONFIG.Retrieval.apiProviderEnabled) return { provider: html, name: "html" };
   if (settings.retrievalProvider === "html") return { provider: html, name: "html" };
   if (settings.retrievalProvider === "api") {
-    if (!apiKey) throw new ConfigError("Add a YouTube Data API key in options, or switch retrieval provider to HTML.");
+    // API is a preference, not a hard dependency. Retrieval still has a
+    // browser-HTML fallback when a key is absent, exhausted, or rejected.
+    if (!apiKey) return { provider: html, name: "html" };
     return { provider: api(), name: "api" };
   }
   return apiKey ? { provider: api(), name: "api" } : { provider: html, name: "html" };
@@ -39,23 +49,36 @@ export async function retrieveQueries(queries, settings, options = {}) {
   const groups = new Array(queries.length);
   const used = new Set();
   let cursor = 0, fatal = null;
-  if (settings.retrievalProvider === "api" && !settings.youtubeApiKey) throw new ConfigError("Add a YouTube Data API key in FocusTube Options, or select Auto/HTML retrieval.");
   const names = settings.retrievalProvider === "html" ? ["html"]
-    : settings.retrievalProvider === "api" ? ["api"]
-      : settings.youtubeApiKey ? ["api", "html"] : ["html"];
+    : settings.retrievalProvider === "api" ? (options.htmlFetchImpl ? ["html", "api"] : ["api", "html"])
+      : settings.youtubeApiKey ? (options.htmlFetchImpl ? ["html", "api"] : ["api", "html"])
+        : ["html"];
   const concurrency = Math.max(1, Math.min(CONFIG.Pipeline.concurrency, queries.length || 1));
   const runWorker = async () => {
     while (cursor < queries.length) {
       const index = cursor++;
       let lastError = null;
+      const failures = [];
       for (const name of names) {
         try {
-          const { provider } = name === "api" && CONFIG.Retrieval.apiProviderEnabled ? { provider: new ApiProvider({ apiKey: settings.youtubeApiKey }) } : { provider: new HtmlProvider() };
+          const { provider } = name === "api" && CONFIG.Retrieval.apiProviderEnabled
+            ? { provider: new ApiProvider({ apiKey: settings.youtubeApiKey }) }
+            : { provider: new HtmlProvider({ fetchImpl: options.htmlFetchImpl || fetch }) };
           groups[index] = await provider.search(queries[index], { maxResults: CONFIG.Pipeline.resultsPerQuery });
           used.add(name); lastError = null; break;
-        } catch (error) { lastError = error; if (name === "api") continue; }
+        } catch (error) {
+          lastError = error;
+          // Keep provider failures distinct so the page can identify which
+          // upstream retrieval source needs attention.
+          if (error?.code === "NETWORK_ERROR") error.code = name === "api" ? "YOUTUBE_API_UNAVAILABLE" : "YOUTUBE_HTML_UNAVAILABLE";
+          failures.push({ provider: name, code: error?.code || "UNKNOWN_ERROR" });
+          if (name === "api") continue;
+        }
       }
-      if (lastError) fatal ||= lastError;
+      if (lastError) {
+        lastError.providerFailures = failures;
+        fatal ||= lastError;
+      }
       if (!groups[index]) groups[index] = [];
     }
   };

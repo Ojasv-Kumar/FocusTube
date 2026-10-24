@@ -69,15 +69,38 @@ export function normalizeRenderer(renderer) {
 export class HtmlProvider {
   constructor({ fetchImpl = fetch } = {}) { this.fetch = fetchImpl; }
   async search(query, options = {}) {
-    const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+    const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(String(query || "").trim())}`;
     let response;
-    try { response = await this.fetch(url, { credentials: "include", redirect: "follow" }); }
-    catch (cause) { throw new NetworkError("Could not retrieve YouTube search HTML.", { cause }); }
-    if (!response.ok) throw new NetworkError(`YouTube returned HTTP ${response.status}.`);
-    const html = await response.text();
-    if (/captcha|consent\.youtube|before you continue|unusual traffic/i.test(html.slice(0, 100_000))) throw new NetworkError("YouTube showed a consent or verification page; HTML retrieval is unavailable.");
+    try { response = await this.fetch(url, { method: "GET", credentials: "omit", cache: "no-store" }); }
+    catch (cause) {
+      const error = new NetworkError("Could not retrieve YouTube search in this browser.", { cause });
+      error.code = "YOUTUBE_HTML_FETCH_FAILED";
+      throw error;
+    }
+    let html;
+    try { html = await response.text(); }
+    catch {
+      const error = new NetworkError("YouTube returned unreadable search data.");
+      error.code = "YOUTUBE_HTML_INVALID";
+      throw error;
+    }
+    if (!response.ok) {
+      const error = new NetworkError(`YouTube search returned HTTP ${response.status}.`);
+      error.code = `YOUTUBE_HTML_HTTP_${response.status}`;
+      throw error;
+    }
+    html = String(html || "");
+    if (/captcha|consent\.youtube|before you continue|unusual traffic/i.test(html.slice(0, 100_000))) {
+      const error = new NetworkError("YouTube showed a consent or verification page; HTML retrieval is unavailable.");
+      error.code = "YOUTUBE_CONSENT_REQUIRED";
+      throw error;
+    }
     const data = extractInitialData(html);
-    if (!data) throw new NetworkError("YouTube's search page structure was not recognized.");
+    if (!data) {
+      const error = new NetworkError("YouTube's search page structure was not recognized.");
+      error.code = "YOUTUBE_HTML_PARSE_FAILED";
+      throw error;
+    }
     const renderers = collectRenderers(data);
     const limit = options.maxResults || CONFIG.Pipeline.resultsPerQuery;
     return renderers.map(normalizeRenderer).filter(video => video.id && video.title).slice(0, limit);

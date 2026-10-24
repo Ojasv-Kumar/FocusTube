@@ -7,11 +7,12 @@ import { Cache } from "./cache.js";
 import { runPipeline } from "./pipeline.js";
 import { LlmClient } from "./llm-client.js";
 import { CONFIG } from "../config.js";
+import { createYouTubeTabFetch } from "./retrieval/youtube-tab-fetch.js";
 
 const cache = new Cache(chrome.storage.local);
 function publicSettings(settings) {
-  const { youtubeApiKey, ...safe } = settings;
-  return { ...safe, hasYoutubeApiKey: Boolean(youtubeApiKey) };
+  const { youtubeApiKey, geminiApiKeys, ...safe } = settings;
+  return { ...safe, hasYoutubeApiKey: Boolean(youtubeApiKey), geminiKeyCount: String(geminiApiKeys || "").split(/[\n,;]+/).filter(value => value.trim()).length };
 }
 function extensionPage(sender) { return typeof sender?.url === "string" && sender.url.startsWith(chrome.runtime.getURL("")); }
 function respondWith(promise, sendResponse) {
@@ -41,12 +42,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { ok: true, settings: publicSettings(updated) };
       }
       case MESSAGE.RUN_PIPELINE:
-        return runPipeline(message.payload || {}, settings, { cache, correlationId });
+        {
+          const tabId = sender?.tab?.id;
+          const htmlFetchImpl = createYouTubeTabFetch({ scripting: chrome.scripting, tabId, fallbackFetch: fetch });
+          return runPipeline(message.payload || {}, settings, { cache, correlationId, htmlFetchImpl });
+        }
       case MESSAGE.TEST_LLM: {
         const client = new LlmClient(settings);
-        return { ok: true, health: await client.health() };
+        return { ok: true, health: await client.testConnection() };
       }
-      case MESSAGE.BACKEND_HEALTH: return { ok: true, health: await new LlmClient(settings).health() };
+      case MESSAGE.GEMINI_HEALTH: return { ok: true, health: await new LlmClient(settings).health() };
       case MESSAGE.CLEAR_CACHE:
         if (!extensionPage(sender)) return { ok: false, errorCode: "FORBIDDEN", userMessage: "Use FocusTube options to clear its cache." };
         return { ok: true, cleared: await cache.clear() };

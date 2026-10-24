@@ -6,7 +6,7 @@ import { Cache, cacheKey } from "./cache.js";
 import { LlmClient } from "./llm-client.js";
 import { QUERY_EXPANSION, LEARN_JUDGE, INTEREST_EXPANSION, INTEREST_JUDGE, CURIOSITY_JUDGE } from "./prompts.js";
 import { validateLearnJudge, validateInterestJudge, validateCuriosityJudge, validateQueries } from "./validators.js";
-import { retrieveQueries, mergeVideos } from "./retrieval/index.js";
+import { retrieveQueries, mergeVideos, interleaveQueryResults } from "./retrieval/index.js";
 
 const inFlight = new Map();
 const ROLE_ORDER = { intro: 0, deep_dive: 1, hands_on: 2, reference: 3, other: 4 };
@@ -18,6 +18,27 @@ function candidateShape(video) {
 }
 function sortLearn(videos) {
   return videos.sort((a, b) => (ROLE_ORDER[a.role] ?? 4) - (ROLE_ORDER[b.role] ?? 4) || ((b.relevance || 0) + (b.quality || 0)) - ((a.relevance || 0) + (a.quality || 0)));
+}
+function diversifyChannels(videos, limit, maxPerChannel = 2) {
+  const selected = [], counts = new Map(), deferred = [];
+  for (const video of videos) {
+    const channel = String(video.channelName || "").trim().toLocaleLowerCase() || `unknown:${video.id}`;
+    if ((counts.get(channel) || 0) >= maxPerChannel) { deferred.push(video); continue; }
+    selected.push(video);
+    counts.set(channel, (counts.get(channel) || 0) + 1);
+    if (selected.length >= limit) return selected;
+  }
+  for (const video of deferred) {
+    selected.push(video);
+    if (selected.length >= limit) break;
+  }
+  return selected;
+}
+function safeAiFailure(error) {
+  return String(error?.message || "Gemini could not complete the ranking request.")
+    .replace(/AIza[0-9A-Za-z_-]{20,}/g, "[redacted API key]")
+    .replace(/[\r\n\t]+/g, " ")
+    .slice(0, 220);
 }
 async function loadMock(mode, query, action) {
   if (action === "home") {
@@ -32,6 +53,7 @@ async function loadMock(mode, query, action) {
 function baseMetadata(startedAt) { return { providers: [], cacheHit: false, tokenEstimate: 0, timingsMs: {}, degraded: false, reason: null, fallbackLabel: null, channels: [] }; }
 function pipelineCacheKey(mode, query, interest, action, settings) {
   return cacheKey({ mode, query: normalizeQuery(query).toLocaleLowerCase(), interest: normalizeQuery(interest).toLocaleLowerCase(), action,
+    curiosityFeedVersion: "balanced-topic-mix-v3",
     retrievalProvider: settings.retrievalProvider || CONFIG.Retrieval.defaultProvider, hasYoutubeApiKey: Boolean(settings.youtubeApiKey),
     prompts: [QUERY_EXPANSION.version, LEARN_JUDGE.version, INTEREST_EXPANSION.version, INTEREST_JUDGE.version, CURIOSITY_JUDGE.version],
     mockMode: settings.mockMode, resultsPerSearch: settings.resultsPerSearch, curiosityStrictness: settings.curiosityStrictness, pipelineConfig: CONFIG.Pipeline });
@@ -44,7 +66,7 @@ async function cachedExpansion(cache, keyParts, prompt, llm, correlationId) {
   await cache.set(key, value, CONFIG.Cache.ttlMs.expansion);
   return { value, hit: false };
 }
-async function retrieveWithCache(queries, settings, cache) {
+async function retrieveWithCache(queries, settings, cache, htmlFetchImpl) {
   const groups = new Array(queries.length);
   const providers = new Set();
   const missing = [];
@@ -56,7 +78,7 @@ async function retrieveWithCache(queries, settings, cache) {
   }
   let lastError = null;
   if (missing.length) {
-    const fresh = await retrieveQueries(missing.map(index => queries[index]), settings);
+    const fresh = await retrieveQueries(missing.map(index => queries[index]), settings, { htmlFetchImpl });
     fresh.providers.forEach(provider => providers.add(provider));
     lastError = fresh.error;
     for (let offset = 0; offset < missing.length; offset += 1) {
@@ -68,7 +90,7 @@ async function retrieveWithCache(queries, settings, cache) {
   return { videos: mergeVideos(groups.map(group => group || [])), queryResults: groups, providers: [...providers], error: groups.flat().length ? null : lastError, cacheHit: queries.some((_, index) => !missing.includes(index)) };
 }
 
-export async function runPipeline(request, settings, { cache = cacheStorage(), correlationId = "", isCurrent = () => true } = {}) {
+export async function runPipeline(request, settings, { cache = cacheStorage(), correlationId = "", isCurrent = () => true, htmlFetchImpl } = {}) {
   const startedAt = Date.now();
   const mode = request.mode || "learn";
   const action = request.action || "search";
@@ -103,7 +125,7 @@ export async function runPipeline(request, settings, { cache = cacheStorage(), c
           metadata.cacheHit ||= expansion.hit;
           queries = validateQueries(expansion.value, query, CONFIG.Pipeline.queriesPerSearch);
         } catch (error) { aiError = error; logger.warn("pipeline", `query expansion failed (${correlationId})`, error.code || error.name); }
-        retrieval = await retrieveWithCache(queries, settings, cache); metadata.cacheHit ||= retrieval.cacheHit;
+        retrieval = await retrieveWithCache(queries, settings, cache, htmlFetchImpl); metadata.cacheHit ||= retrieval.cacheHit;
         rawCandidates = retrieval.videos;
       } else if (mode === "interest") {
         if (action === "home") {
@@ -115,12 +137,12 @@ export async function runPipeline(request, settings, { cache = cacheStorage(), c
           } catch (error) { aiError = error; queries = interest.split(/[,;]+/).map(part => part.trim()).filter(Boolean).slice(0, CONFIG.Pipeline.interestFallbackQueries); }
         } else queries = [query];
         if (!queries.length) queries = [interest];
-        retrieval = await retrieveWithCache(queries, settings, cache); metadata.cacheHit ||= retrieval.cacheHit; rawCandidates = retrieval.videos;
+        retrieval = await retrieveWithCache(queries, settings, cache, htmlFetchImpl); metadata.cacheHit ||= retrieval.cacheHit; rawCandidates = action === "home" ? interleaveQueryResults(retrieval.queryResults) : retrieval.videos;
       } else {
         try { channels = (await loadJson(SEED_URL)).slice(0, CONFIG.Pipeline.curiositySeedChannelsPerFeed).map(item => item.name); } catch { channels = []; }
         if (action === "home") queries = [...channels, ...CONFIG.Pipeline.curiosityTopicQueries].slice(0, CONFIG.Pipeline.curiositySeedChannelsPerFeed + CONFIG.Pipeline.curiosityTopicQueries.length);
         else queries = [query];
-        retrieval = await retrieveWithCache(queries, settings, cache); metadata.cacheHit ||= retrieval.cacheHit; rawCandidates = retrieval.videos;
+        retrieval = await retrieveWithCache(queries, settings, cache, htmlFetchImpl); metadata.cacheHit ||= retrieval.cacheHit; rawCandidates = action === "home" ? interleaveQueryResults(retrieval.queryResults) : retrieval.videos;
       }
       metadata.providers = retrieval.providers;
       metadata.timingsMs.retrieval = Date.now() - retrievalStart;
@@ -146,10 +168,7 @@ export async function runPipeline(request, settings, { cache = cacheStorage(), c
           const data = await llm.completeJson({ task: "score", system: CURIOSITY_JUDGE.system, user: CURIOSITY_JUDGE.user({ candidates: pool }), maxTokens: CONFIG.LLM.maxOutputTokens.judge, temperature: CONFIG.LLM.temperature.judge, correlationId });
           const strictnessLimit = { relaxed: 0.9, balanced: CONFIG.Pipeline.curiosityMaximumSensationalScore, strict: 0.55 }[settings.curiosityStrictness] ?? CONFIG.Pipeline.curiosityMaximumSensationalScore;
           judged = validateCuriosityJudge(data, candidateVideos).videos.filter(video => video.sensational < strictnessLimit && video.substance >= CONFIG.Pipeline.minimumRelevance).sort((a,b)=>b.substance-a.substance);
-          if (action === "home") {
-            const seedNames = new Set(channels.map(name => name.toLocaleLowerCase()));
-            judged.sort((a,b) => Number(seedNames.has(b.channelName.toLocaleLowerCase())) - Number(seedNames.has(a.channelName.toLocaleLowerCase())) || b.substance-a.substance);
-          }
+          if (action === "home") judged.sort((a,b) => b.substance-a.substance);
         }
       } catch (error) { aiError = error; rankError = error; logger.warn("pipeline", `AI judging failed (${correlationId})`, error.code || error.name); }
       metadata.timingsMs.judging = Date.now() - judgingStart;
@@ -157,7 +176,7 @@ export async function runPipeline(request, settings, { cache = cacheStorage(), c
       metadata.llmProviders = [...llm.providers];
       metadata.usedFallback = llm.usedFallback;
       if (!isCurrent()) return { ok: false, errorCode: "CANCELLED", userMessage: "A newer request replaced this one." };
-      if ((aiError || rankError) && mode === "learn") return { ok: false, errorCode: aiError?.code || rankError?.code || "AI_UNAVAILABLE", userMessage: "FocusTube curation is unavailable right now. Native YouTube results are restored. Retry when the backend is available." };
+      if ((aiError || rankError) && mode === "learn") return { ok: false, errorCode: aiError?.code || rankError?.code || "AI_UNAVAILABLE", userMessage: "FocusTube curation is unavailable right now. Native YouTube results are restored. Check Gemini settings, then retry." };
       if (rankError && (mode === "interest" || mode === "curiosity")) {
         // Keep these browsing modes useful when retrieval worked but the
         // ranking provider did not. Never imply that these candidates were
@@ -165,9 +184,13 @@ export async function runPipeline(request, settings, { cache = cacheStorage(), c
         judged = candidateVideos.map(video => ({ ...video, reason: "Retrieved from YouTube search; not AI-ranked." }));
         metadata.degraded = true;
         metadata.reason = rankError?.code || "AI_UNAVAILABLE";
-        metadata.fallbackLabel = "AI ranking is unavailable. These are unranked YouTube search matches.";
+        const aiTask = mode === "curiosity" ? "Gemini substance scoring" : "Gemini relevance ranking";
+        metadata.fallbackLabel = `${aiTask} unavailable (${metadata.reason}). ${safeAiFailure(rankError)} These are unranked YouTube search matches.`;
       }
-      const videos = judged.slice(0, Math.min(CONFIG.Pipeline.maxVideosShown, settings.resultsPerSearch || CONFIG.Pipeline.maxVideosShown));
+      const resultLimit = Math.min(CONFIG.Pipeline.maxVideosShown, settings.resultsPerSearch || CONFIG.Pipeline.maxVideosShown);
+      const videos = mode === "curiosity" && action === "home"
+        ? diversifyChannels(judged, resultLimit)
+        : judged.slice(0, resultLimit);
       if (!videos.length) return { ok: false, errorCode: "EMPTY_RESULTS", userMessage: "No videos met the quality threshold. Try a broader query or show original results." };
       if (!metadata.degraded) {
         metadata.degraded = Boolean(aiError);

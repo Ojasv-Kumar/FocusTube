@@ -3,6 +3,8 @@ import { CONFIG } from "./config.js";
 export const DEFAULT_SETTINGS = Object.freeze({
   activeMode: null, interestText: CONFIG.Settings.defaultInterestTopic,
   youtubeApiKey: "", retrievalProvider: CONFIG.Retrieval.defaultProvider,
+  geminiApiKeys: "", geminiFastModel: CONFIG.LLM.fastModel, geminiSmartModel: CONFIG.LLM.smartModel,
+  geminiFallbackModels: CONFIG.LLM.fallbackModels.join(", "),
   askForModeEveryTab: CONFIG.Settings.askForModeEveryTab,
   keepCommentsVisible: CONFIG.Settings.keepCommentsVisible,
   hideShortsInLearn: CONFIG.Settings.hideShortsInLearn,
@@ -17,6 +19,9 @@ export function validateSettings(input = {}) {
   const out = { ...DEFAULT_SETTINGS };
   for (const key of ["interestText", "defaultInterestTopic"]) if (typeof input[key] === "string") out[key] = input[key].trim().slice(0, 120);
   if (typeof input.youtubeApiKey === "string") out.youtubeApiKey = input.youtubeApiKey.trim();
+  if (typeof input.geminiApiKeys === "string") out.geminiApiKeys = input.geminiApiKeys.trim();
+  for (const key of ["geminiFastModel", "geminiSmartModel"]) if (typeof input[key] === "string" && input[key].trim()) out[key] = input[key].trim().slice(0, 100);
+  if (typeof input.geminiFallbackModels === "string") out.geminiFallbackModels = input.geminiFallbackModels.trim().slice(0, 1000);
   if (["auto", "api", "html"].includes(input.retrievalProvider)) out.retrievalProvider = input.retrievalProvider;
   // Older/local settings can retain "api" even when no YouTube key was ever
   // saved in this browser. In that state use the working HTML fallback rather

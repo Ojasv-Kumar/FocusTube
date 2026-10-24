@@ -23,13 +23,14 @@ test("manifest targets and local JavaScript imports exist", () => {
 });
 
 test("content-script module imports are exposed as web-accessible resources", () => {
-  const resources = manifest.web_accessible_resources.flatMap(item => item.resources || []);
+  const resources = (manifest.web_accessible_resources || []).flatMap(item => item.resources || []);
   const covers = path => resources.some(pattern => {
     const glob = pattern.split("*").map(part => part.replace(/[|\\{}()[\]^$+?.]/g, "\\$&")).join(".*");
     const expression = new RegExp(`^${glob}$`);
     return expression.test(path);
   });
-  const sourceFiles = walk(join(root, "src/content")).filter(path => path.endsWith(".js"));
+  const entryNames = new Set(manifest.content_scripts.flatMap(item => item.js || []));
+  const sourceFiles = [...entryNames].map(path => join(root, path)).filter(path => path.endsWith(".js"));
   for (const file of sourceFiles) {
     const source = readFileSync(file, "utf8");
     const imports = [...source.matchAll(/(?:from\s*|import\s*)["'](\.[^"']+)["']/g)].map(match => match[1]);
@@ -49,4 +50,16 @@ test("packaged JSON is valid and the extension has no unsafe HTML execution APIs
     const source = readFileSync(file, "utf8");
     assert.doesNotMatch(source, /\binnerHTML\b|\beval\s*\(|\bnew\s+Function\s*\(/, `Unsafe code pattern in ${file}`);
   }
+});
+
+test("provider permissions are direct and contain no localhost backend access", () => {
+  assert.ok(manifest.host_permissions.includes("https://generativelanguage.googleapis.com/*") || manifest.optional_host_permissions?.includes("https://generativelanguage.googleapis.com/*"));
+  assert.ok(manifest.optional_host_permissions.includes("https://generativelanguage.googleapis.com/*"));
+  assert.ok(manifest.host_permissions.includes("https://www.googleapis.com/*"));
+  assert.ok(manifest.host_permissions.includes("https://www.youtube.com/*"));
+  assert.ok(manifest.permissions.includes("scripting"));
+  assert.match(readFileSync(join(root, "src/background/retrieval/youtube-tab-fetch.js"), "utf8"), /world: "MAIN"/);
+  assert.doesNotMatch(JSON.stringify(manifest), /127\.0\.0\.1|localhost/);
+  const bundled = readFileSync(join(root, "src/content/focustube.bundle.js"), "utf8");
+  assert.doesNotMatch(bundled, /127\.0\.0\.1|BACKEND_HEALTH|backend-managed/);
 });

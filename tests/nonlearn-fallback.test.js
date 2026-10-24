@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createYouTubeTabFetch } from "../src/background/retrieval/youtube-tab-fetch.js";
 
 class MemoryStorage {
   constructor() { this.values = new Map(); }
@@ -25,9 +26,9 @@ function searchHtml(id = "robotics-video") {
 test("API-only preference falls back to YouTube HTML after API failure", async () => {
   const previousFetch = globalThis.fetch;
   globalThis.chrome = { storage: { local: new MemoryStorage() } };
-  globalThis.fetch = async url => String(url).endsWith("/v1/youtube/api")
-    ? { ok: true, status: 200, json: async () => ({ ok: true, status: 403, data: { error: { code: 403, errors: [{ reason: "keyInvalid" }] } } }) }
-    : { ok: true, status: 200, json: async () => ({ ok: true, status: 200, html: searchHtml() }) };
+  globalThis.fetch = async url => String(url).includes("googleapis.com/youtube/v3/search")
+    ? { ok: false, status: 403, json: async () => ({ error: { code: 403, errors: [{ reason: "keyInvalid" }] } }) }
+    : { ok: true, status: 200, text: async () => searchHtml() };
   try {
     const { retrieveQueries } = await import("../src/background/retrieval/index.js");
     const result = await retrieveQueries(["robotics"], { retrievalProvider: "api", youtubeApiKey: "invalid-test-key" });
@@ -37,12 +38,54 @@ test("API-only preference falls back to YouTube HTML after API failure", async (
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test("YouTube-tab HTML route is tried before API when a same-origin fetch is available", async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.chrome = { storage: { local: new MemoryStorage() } };
+  let pageFetches = 0;
+  globalThis.fetch = async () => { throw new Error("worker fetch should not be used"); };
+  try {
+    const { retrieveQueries } = await import("../src/background/retrieval/index.js");
+    const result = await retrieveQueries(["robotics"], { retrievalProvider: "api", youtubeApiKey: "valid-looking-key" }, {
+      htmlFetchImpl: async () => {
+        pageFetches += 1;
+        return { ok: true, status: 200, text: async () => searchHtml("page-world-video") };
+      }
+    });
+    assert.equal(pageFetches, 1);
+    assert.deepEqual(result.providers, ["html"]);
+    assert.equal(result.videos[0]?.id, "page-world-video");
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test("YouTube page fetch uses the MAIN world and falls back if injection is rejected", async () => {
+  let injected;
+  let fallbackCalls = 0;
+  const fetchImpl = createYouTubeTabFetch({
+    tabId: 42,
+    scripting: { executeScript: async details => { injected = details; return [{ result: { ok: true, status: 200, html: "page html" } }]; } },
+    fallbackFetch: async () => { fallbackCalls += 1; return { ok: true, status: 200, text: async () => "fallback html" }; }
+  });
+  const response = await fetchImpl("https://www.youtube.com/results?search_query=robotics");
+  assert.equal(injected.target.tabId, 42);
+  assert.equal(injected.world, "MAIN");
+  assert.equal(await response.text(), "page html");
+  assert.equal(fallbackCalls, 0);
+
+  const fallback = createYouTubeTabFetch({
+    tabId: 42, scripting: { executeScript: async () => { throw new Error("injection denied"); } },
+    fallbackFetch: async () => { fallbackCalls += 1; return { ok: true, status: 200 }; }
+  });
+  await fallback("https://www.youtube.com/results?search_query=robotics");
+  assert.equal(fallbackCalls, 1);
+  await assert.rejects(fetchImpl("https://example.com/search"), /only fetches YouTube/);
+});
+
 test("retrieval reports the exact failing source instead of blaming the AI backend", async () => {
   const previousFetch = globalThis.fetch;
   globalThis.chrome = { storage: { local: new MemoryStorage() } };
   globalThis.fetch = async url => {
-    if (String(url).endsWith("/v1/youtube/api")) {
-      return { ok: true, status: 200, json: async () => ({ ok: true, status: 403, data: { error: { code: 403, errors: [{ reason: "keyInvalid" }] } } }) };
+    if (String(url).includes("googleapis.com/youtube/v3/search")) {
+      return { ok: false, status: 403, json: async () => ({ error: { code: 403, errors: [{ reason: "keyInvalid" }] } }) };
     }
     throw new TypeError("Network request blocked");
   };
@@ -51,14 +94,14 @@ test("retrieval reports the exact failing source instead of blaming the AI backe
       import("../src/background/retrieval/index.js"), import("../src/errors.js")
     ]);
     const result = await retrieveQueries(["robotics"], { retrievalProvider: "api", youtubeApiKey: "invalid-test-key" });
-    assert.equal(result.error?.code, "YOUTUBE_PROXY_UNAVAILABLE");
+    assert.equal(result.error?.code, "YOUTUBE_HTML_FETCH_FAILED");
     assert.deepEqual(result.error?.providerFailures, [
       { provider: "api", code: "CONFIG_ERROR" },
-      { provider: "html", code: "YOUTUBE_PROXY_UNAVAILABLE" }
+      { provider: "html", code: "YOUTUBE_HTML_FETCH_FAILED"}
     ]);
     const mapped = friendlyError(result.error);
-    assert.match(mapped.userMessage, /local YouTube retrieval proxy/i);
-    assert.match(mapped.userMessage, /api: CONFIG_ERROR; html: YOUTUBE_PROXY_UNAVAILABLE/);
+    assert.match(mapped.userMessage, /could not fetch YouTube search/i);
+    assert.match(mapped.userMessage, /api: CONFIG_ERROR; html: YOUTUBE_HTML_FETCH_FAILED/);
     assert.doesNotMatch(mapped.userMessage, /local AI backend/);
   } finally { globalThis.fetch = previousFetch; }
 });
@@ -75,8 +118,8 @@ for (const mode of ["interest", "curiosity"]) {
       if (String(url).includes("curiosity-seed-channels.json")) {
         return { ok: true, status: 200, json: async () => [{ name: "PBS Space Time" }] };
       }
-      if (String(url).includes("/v1/generate")) throw new TypeError("backend intentionally unavailable in this test");
-      return { ok: true, status: 200, json: async () => ({ ok: true, status: 200, html: searchHtml() }) };
+      if (String(url).includes("generativelanguage.googleapis.com")) throw new TypeError("Gemini intentionally unavailable in this test");
+      return { ok: true, status: 200, text: async () => searchHtml() };
     };
     try {
       const [{ runPipeline }, { Cache }] = await Promise.all([
@@ -91,6 +134,8 @@ for (const mode of ["interest", "curiosity"]) {
       assert.equal(result.videos[0]?.id, "robotics-video");
       assert.equal(result.metadata.degraded, true);
       assert.match(result.metadata.fallbackLabel, /unranked YouTube search matches/);
+      assert.match(result.metadata.fallbackLabel, /MISSING_GEMINI_KEYS/);
+      assert.match(result.metadata.fallbackLabel, /Add one or more Gemini API keys/);
       assert.match(result.videos[0].reason, /not AI-ranked/);
     } finally { globalThis.fetch = previousFetch; }
   });

@@ -36,14 +36,14 @@ test("Learn pipeline ranks only its candidate pool and excludes likely Shorts", 
   ]})};`;
   const calls = [];
   globalThis.fetch = async (url, init = {}) => {
-    if (String(url).includes("/v1/generate")) {
+    if (String(url).includes("generativelanguage.googleapis.com")) {
       const request = JSON.parse(init.body);
-      const user = request.user;
+      const user = request.contents[0].parts[0].text;
       calls.push(user);
       const result = user.includes("Expand the learning request")
         ? { queries: ["Backpropagation intuition", "Backpropagation derivation"] }
         : { videos: [{ id: "long-one", relevance: 0.94, quality: 0.9, role: "intro", reason: "A clear, step-by-step explanation.", include: true }] };
-      return { ok: true, status: 200, json: async () => ({ ok: true, text: JSON.stringify(result), provider: "fake" }), headers: new Headers() };
+      return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(result) }] } }] }), headers: new Headers() };
     }
     return { ok: true, status: 200, text: async () => html };
   };
@@ -52,7 +52,7 @@ test("Learn pipeline ranks only its candidate pool and excludes likely Shorts", 
   const { Cache } = await import("../src/background/cache.js");
   const result = await runPipeline(
     { mode: "learn", query: "Backpropagation", action: "search" },
-    { llmBaseUrl: "https://api.openai.com/v1", llmApiKey: "test", fastModel: "test", smartModel: "test", retrievalProvider: "html", youtubeApiKey: "", mockMode: false },
+    { geminiApiKeys: "test-key", geminiFastModel: "test-fast", geminiSmartModel: "test-smart", retrievalProvider: "html", youtubeApiKey: "", mockMode: false },
     { cache: new Cache(local), correlationId: "integration" }
   );
 
@@ -64,8 +64,8 @@ test("Learn pipeline ranks only its candidate pool and excludes likely Shorts", 
   assert.equal(calls.length, 2, "one expansion call and one judge call should complete");
   assert.doesNotMatch(calls[1], /short-duration|short-route/);
 
-  globalThis.fetch = async url => String(url).includes("/v1/generate")
-    ? { ok: false, status: 503, json: async () => ({ ok: false, errorCode: "BACKEND_UNAVAILABLE" }) }
+  globalThis.fetch = async url => String(url).includes("generativelanguage.googleapis.com")
+    ? { ok: false, status: 503, json: async () => ({ error: { message: "Unavailable" } }) }
     : { ok: true, status: 200, text: async () => html };
   const fallback = await runPipeline({ mode: "learn", query: "Backpropagation fallback", action: "search" }, { mockMode: false }, { cache: new Cache(local), correlationId: "fallback" });
   assert.equal(fallback.ok, false);

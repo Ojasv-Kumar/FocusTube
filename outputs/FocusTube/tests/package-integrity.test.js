@@ -51,3 +51,15 @@ test("packaged JSON is valid and the extension has no unsafe HTML execution APIs
     assert.doesNotMatch(source, /\binnerHTML\b|\beval\s*\(|\bnew\s+Function\s*\(/, `Unsafe code pattern in ${file}`);
   }
 });
+
+test("provider permissions are direct and contain no localhost backend access", () => {
+  assert.ok(manifest.host_permissions.includes("https://generativelanguage.googleapis.com/*") || manifest.optional_host_permissions?.includes("https://generativelanguage.googleapis.com/*"));
+  assert.ok(manifest.optional_host_permissions.includes("https://generativelanguage.googleapis.com/*"));
+  assert.ok(manifest.host_permissions.includes("https://www.googleapis.com/*"));
+  assert.ok(manifest.host_permissions.includes("https://www.youtube.com/*"));
+  assert.ok(manifest.permissions.includes("scripting"));
+  assert.match(readFileSync(join(root, "src/background/retrieval/youtube-tab-fetch.js"), "utf8"), /world: "MAIN"/);
+  assert.doesNotMatch(JSON.stringify(manifest), /127\.0\.0\.1|localhost/);
+  const bundled = readFileSync(join(root, "src/content/focustube.bundle.js"), "utf8");
+  assert.doesNotMatch(bundled, /127\.0\.0\.1|BACKEND_HEALTH|backend-managed/);
+});
