@@ -1,54 +1,43 @@
 import { CONFIG } from "./config.js";
 
 export const DEFAULT_SETTINGS = Object.freeze({
-  activeMode: null, interestText: CONFIG.Settings.defaultInterestTopic,
-  youtubeApiKey: "", retrievalProvider: CONFIG.Retrieval.defaultProvider,
-  geminiApiKeys: "", geminiFastModel: CONFIG.LLM.fastModel, geminiSmartModel: CONFIG.LLM.smartModel,
-  geminiFallbackModels: CONFIG.LLM.fallbackModels.join(", "),
-  askForModeEveryTab: CONFIG.Settings.askForModeEveryTab,
-  keepCommentsVisible: CONFIG.Settings.keepCommentsVisible,
-  hideShortsInLearn: CONFIG.Settings.hideShortsInLearn,
-  disableAutoplayInLearn: CONFIG.Settings.disableAutoplayInLearn,
-  resultsPerSearch: CONFIG.Settings.resultsPerSearch, showReasons: CONFIG.Settings.showReasons,
-  defaultInterestTopic: CONFIG.Settings.defaultInterestTopic,
-  curiosityStrictness: CONFIG.Settings.curiosityStrictness, density: CONFIG.Settings.density,
-  mockMode: CONFIG.Settings.mockMode, debugLogging: CONFIG.Settings.debugLogging
+  activeMode: null,
+  hideCommentsInLearn: CONFIG.Settings.hideCommentsInLearn,
+  hideSubscriptionsInLearn: CONFIG.Settings.hideSubscriptionsInLearn,
+  theme: CONFIG.Settings.theme
 });
-const obsoleteKeys = ["llmApiKey", "llmBaseUrl", "fastModel", "smartModel"];
+
+const obsoleteKeys = [
+  "youtubeApiKey", "geminiApiKeys", "geminiFastModel", "geminiSmartModel", "geminiFallbackModels",
+  "retrievalProvider", "llmApiKey", "llmBaseUrl", "fastModel", "smartModel", "focustube.apiQuota",
+  "interestText", "defaultInterestTopic", "curiosityStrictness", "mockMode", "debugLogging", "showReasons",
+  "hideShortsInLearn", "disableAutoplayInLearn", "keepCommentsVisible", "density", "askForModeEveryTab", "resultsPerSearch"
+];
+
 export function validateSettings(input = {}) {
   const out = { ...DEFAULT_SETTINGS };
-  for (const key of ["interestText", "defaultInterestTopic"]) if (typeof input[key] === "string") out[key] = input[key].trim().slice(0, 120);
-  if (typeof input.youtubeApiKey === "string") out.youtubeApiKey = input.youtubeApiKey.trim();
-  if (typeof input.geminiApiKeys === "string") out.geminiApiKeys = input.geminiApiKeys.trim();
-  for (const key of ["geminiFastModel", "geminiSmartModel"]) if (typeof input[key] === "string" && input[key].trim()) out[key] = input[key].trim().slice(0, 100);
-  if (typeof input.geminiFallbackModels === "string") out.geminiFallbackModels = input.geminiFallbackModels.trim().slice(0, 1000);
-  if (["auto", "api", "html"].includes(input.retrievalProvider)) out.retrievalProvider = input.retrievalProvider;
-  // Older/local settings can retain "api" even when no YouTube key was ever
-  // saved in this browser. In that state use the working HTML fallback rather
-  // than leaving Interest and Curiosity feeds with no retrieval provider.
-  if (out.retrievalProvider === "api" && !out.youtubeApiKey) out.retrievalProvider = "auto";
-  for (const key of ["askForModeEveryTab", "keepCommentsVisible", "hideShortsInLearn", "disableAutoplayInLearn", "showReasons", "mockMode", "debugLogging"]) if (typeof input[key] === "boolean") out[key] = input[key];
-  if ([5, 8, 10, 15].includes(Number(input.resultsPerSearch))) out.resultsPerSearch = Number(input.resultsPerSearch);
-  if (["relaxed", "balanced", "strict"].includes(input.curiosityStrictness)) out.curiosityStrictness = input.curiosityStrictness;
-  if (["compact", "comfortable"].includes(input.density)) out.density = input.density;
-  if (["learn", "interest", "curiosity", "relax"].includes(input.activeMode)) out.activeMode = input.activeMode;
-  out.interestText ||= out.defaultInterestTopic;
+  if (["learn", "relax"].includes(input.activeMode)) out.activeMode = input.activeMode;
+  if (typeof input.hideCommentsInLearn === "boolean") out.hideCommentsInLearn = input.hideCommentsInLearn;
+  if (typeof input.hideSubscriptionsInLearn === "boolean") out.hideSubscriptionsInLearn = input.hideSubscriptionsInLearn;
+  if (["dark", "light"].includes(input.theme)) out.theme = input.theme;
   return out;
 }
+
 export async function getSettings(storageArea = globalThis.chrome?.storage?.local) {
   if (!storageArea) return { ...DEFAULT_SETTINGS };
-  const values = await storageArea.get(null);
-  if (obsoleteKeys.some(key => key in (values || {}))) await storageArea.remove(obsoleteKeys);
-  return validateSettings(values || {});
+  const values = await storageArea.get(null) || {};
+  const stale = obsoleteKeys.filter(key => key in values);
+  if (stale.length) await storageArea.remove(stale);
+  return validateSettings(values);
 }
+
 export async function saveSettings(partial, storageArea = globalThis.chrome?.storage?.local) {
   const current = await getSettings(storageArea);
-  const changes = { ...partial };
-  if (typeof changes.defaultInterestTopic === "string" && current.interestText === current.defaultInterestTopic && changes.interestText === undefined) changes.interestText = changes.defaultInterestTopic;
-  const next = validateSettings({ ...current, ...changes });
+  const next = validateSettings({ ...current, ...partial });
   if (storageArea) await storageArea.set(next);
   return next;
 }
+
 export async function clearStoredKeys(prefix = "focustube.cache.", storageArea = globalThis.chrome?.storage?.local) {
   if (!storageArea) return 0;
   const all = await storageArea.get(null);

@@ -44,7 +44,12 @@ function collectRenderers(root, output = []) {
   if (root.videoRenderer) output.push(root.videoRenderer);
   for (const value of Object.values(root)) {
     if (Array.isArray(value)) for (const child of value) collectRenderers(child, output);
-    else if (value && typeof value === "object") collectRenderers(value, output);
+    else if (value && typeof value === "object") {
+      // Shorts are wrapped in reel shelves/cards. Do not traverse those trees,
+      // which avoids rendering empty Shorts placeholders as regular videos.
+      if (value.reelShelfRenderer || value.reelItemRenderer || value.shortsLockupViewModel) continue;
+      collectRenderers(value, output);
+    }
   }
   return output;
 }
@@ -63,7 +68,7 @@ export function normalizeRenderer(renderer) {
     durationSeconds, viewCount: parseViewCount(viewText), publishedText: textValue(renderer.publishedTimeText), publishedAt: null,
     description: textValue(renderer.detailedMetadataSnippets?.[0]?.snippetText).slice(0, CONFIG.Pipeline.maxDescriptionChars),
     thumbnailUrl: thumbnail.at(-1)?.url || "", isLive: /live|premiere|streaming/.test(liveText),
-    isShort: endpoint.startsWith("/shorts/") || (durationSeconds !== null && durationSeconds <= CONFIG.Pipeline.shortsMaxDurationSeconds)
+    isShort: endpoint.startsWith("/shorts/")
   };
 }
 export class HtmlProvider {
@@ -101,7 +106,10 @@ export class HtmlProvider {
       error.code = "YOUTUBE_HTML_PARSE_FAILED";
       throw error;
     }
-    const renderers = collectRenderers(data);
+    const renderers = collectRenderers(data).filter(renderer => {
+      const endpoint = renderer.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url || "";
+      return !endpoint.startsWith("/shorts/");
+    });
     const limit = options.maxResults || CONFIG.Pipeline.resultsPerQuery;
     return renderers.map(normalizeRenderer).filter(video => video.id && video.title).slice(0, limit);
   }

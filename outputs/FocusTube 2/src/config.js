@@ -1,87 +1,33 @@
-/* All product tuning lives here. Keep units and safe ranges beside each value. */
+/* Local behavior and UI tuning. FocusTube uses YouTube search HTML; no external API keys. */
 export const CONFIG = Object.freeze({
-  LLM: {
-    apiBaseUrl: "https://generativelanguage.googleapis.com/v1beta/models",
-    fastModel: "gemini-3.8-flash",
-    smartModel: "gemini-3.8-flash",
-    fallbackModels: [],
-    timeoutMs: 45_000,
-    retriesPerKey: 1,
-    maxOutputTokens: { expansion: 500, judge: 1800, repair: 1800, test: 32 },
-    temperature: { expansion: 0.2, judge: 0.1, repair: 0, test: 0 },
-    repairOutputMaxChars: 12_000,
-    repairSchemaMaxChars: 3_000,
-    retryAfterMaxMs: 30_000
-  },
   Pipeline: {
-    queriesPerSearch: 3, // 1..8; includes the original query
-    resultsPerQuery: 8, // 1..25
-    maxCandidatePoolSize: 36, // 5..100
-    maxDescriptionChars: 420, // 80..2,000
-    minimumVideoDurationSeconds: 181, // seconds; conservative proxy for Shorts up to 3 minutes (0 disables)
-    shortsMaxDurationSeconds: 180, // eligible square/vertical uploads up to 180s can be Shorts
-    minimumRelevance: 0.55, // 0..1
-    maxVideosShown: 15, // 1..30
-    excludeLiveStreams: true,
-    nearDuplicateSimilarity: 0.88, // 0..1 title-token Jaccard threshold
-    concurrency: 3, // 1..8 in-flight retrieval queries
+    resultsPerSearch: 30,
+    maxVideosShown: 18,
+    maxDescriptionChars: 420,
     queryMaxChars: 240,
     titleMaxChars: 260,
     channelNameMaxChars: 120,
-    reasonMaxChars: 140,
-    interestFeedQueries: 15, // 1..15 expansion searches per interest refresh
-    interestChannelSuggestions: 8, // 0..20 names from the expansion response
-    channelSuggestionMaxChars: 100,
-    interestFallbackQueries: 4, // 1..8 comma-separated fallback searches
-    curiositySeedChannelsPerFeed: 6, // 1..40 channel searches per refresh
-    curiosityMaximumSensationalScore: 0.75, // 0..1; higher scores are filtered
-    curiosityTopicQueries: [
-      "science experiment explained", "engineering project build explained", "history of an ancient civilization documentary", "mathematics idea visual explanation",
-      "wildlife behavior nature documentary", "architecture design explained", "economics everyday life explained", "technology invention history documentary"
-    ],
-    demoQueries: ["backpropagation", "op amp basics", "recursion in python"]
+    minimumLocalRelevance: 0.34,
+    nearDuplicateSimilarity: 0.88,
+    excludeLiveStreams: true
   },
-  Cache: {
-    ttlMs: { pipeline: 20 * 60_000, expansion: 6 * 60 * 60_000, retrieval: 30 * 60_000 },
-    maxEntries: 120 // 10..2,000; oldest-first eviction
-  },
+  Cache: { ttlMs: { pipeline: 10 * 60_000, retrieval: 20 * 60_000 }, maxEntries: 120 },
   Modes: {
-    learn: { hideHomeFeed: true, hideShorts: true, hideSubscriptions: true, hideNotifications: true, hideSidebarRecommendations: true, hideEndscreen: true, disableAutoplay: true, hideComments: false, hideTrending: true, redirectShortsToWatch: true, rankingProfile: "learning" },
-    interest: { hideHomeFeed: true, hideShorts: true, hideSidebarRecommendations: false, hideEndscreen: true, disableAutoplay: true, hideComments: false, hideTrending: true, redirectShortsToWatch: true, rankingProfile: "interest" },
-    curiosity: { hideHomeFeed: true, hideShorts: true, hideSidebarRecommendations: false, hideEndscreen: true, disableAutoplay: true, hideComments: false, hideTrending: true, redirectShortsToWatch: true, rankingProfile: "substance" },
-    relax: { hideHomeFeed: false, hideShorts: false, hideSidebarRecommendations: false, hideEndscreen: false, disableAutoplay: false, hideComments: false, hideTrending: false, redirectShortsToWatch: false, rankingProfile: "none" }
+    learn: { hideHomeFeed: true, hideShorts: true, hideTrending: true, hideSidebarRecommendations: true, hideEndscreen: true, disableAutoplay: true },
+    relax: { hideHomeFeed: false, hideShorts: false, hideTrending: false, hideSidebarRecommendations: false, hideEndscreen: false, disableAutoplay: false }
   },
-  Behaviour: { debugLogging: false, showFloatingSwitcher: false, gateWatchdogMs: 15_000, maxWaitMs: 8_000, selectorRetryMs: 250, navigationDebounceMs: 100, autoplayCheckMs: 1_000, autoplayMaxChecks: 12 },
-  Settings: { hideShortsInLearn: true, disableAutoplayInLearn: true, resultsPerSearch: 8, showReasons: true, defaultInterestTopic: "", curiosityStrictness: "balanced", density: "comfortable", mockMode: false, debugLogging: false, askForModeEveryTab: true, keepCommentsVisible: true },
+  Behaviour: { showFloatingSwitcher: false, maxWaitMs: 8_000, selectorRetryMs: 250, navigationDebounceMs: 100, autoplayCheckMs: 1_000, autoplayMaxChecks: 12 },
+  Settings: { hideCommentsInLearn: false, hideSubscriptionsInLearn: true, theme: "dark" },
   UI: {
-    maxResultsShown: 15,
     skeletonCardCount: 4,
-    labels: { intro: "Start here", deep_dive: "Go deeper", hands_on: "Build it", reference: "Keep handy", other: "More useful picks" },
-    modeDescriptions: {
-      learn: "Learn something specific, with a guided path.",
-      interest: "Explore one interest through videos and channels.",
-      curiosity: "Browse broadly, with an eye for high substance.",
-      relax: "Use YouTube as usual."
-    }
+    modeDescriptions: { learn: "A quieter YouTube with focused, locally filtered search.", relax: "Use YouTube as usual." }
   },
-  Retrieval: {
-    defaultProvider: "auto", // Prefer the YouTube Data API when configured; use HTML as a fallback.
-    apiProviderEnabled: true,
-    apiDailySearchCalls: 100, // current YouTube Search Queries bucket default
-    apiDailySearchUnits: 100,
-    apiDailyQuotaLimit: 10_000, // videos.list and other read quota units
-    searchListCost: 1, // current official Search Queries bucket cost per call
-    videosListCost: 1,
-    apiResetTimeZone: "America/Los_Angeles"
-  },
-  ModesPicker: { interestMaxChars: 120, interestMinChars: 2 }
 });
 
 export function validateConfig(config = CONFIG) {
   const problems = [];
-  if (config.Pipeline.queriesPerSearch < 1 || config.Pipeline.queriesPerSearch > 8) problems.push("queriesPerSearch must be 1..8");
-  if (config.Pipeline.minimumRelevance < 0 || config.Pipeline.minimumRelevance > 1) problems.push("minimumRelevance must be 0..1");
-  if (config.Cache.maxEntries < 1) problems.push("cache maxEntries must be positive");
+  if (config.Pipeline.maxVideosShown < 1) problems.push("maxVideosShown must be positive");
+  if (config.Pipeline.minimumLocalRelevance < 0 || config.Pipeline.minimumLocalRelevance > 1) problems.push("minimumLocalRelevance must be 0..1");
   if (!config.Modes.learn || !config.Modes.relax) problems.push("learn and relax modes are required");
   return { ok: problems.length === 0, problems };
 }

@@ -43,7 +43,7 @@ test("content-script module imports are exposed as web-accessible resources", ()
 });
 
 test("packaged JSON is valid and the extension has no unsafe HTML execution APIs", () => {
-  const dataFiles = [...walk(join(root, "data")), ...walk(join(root, "src"))].filter(path => path.endsWith(".json"));
+  const dataFiles = [...(existsSync(join(root, "data")) ? walk(join(root, "data")) : []), ...walk(join(root, "src"))].filter(path => path.endsWith(".json"));
   for (const file of dataFiles) assert.doesNotThrow(() => JSON.parse(readFileSync(file, "utf8")), `Invalid JSON: ${file}`);
   const sourceFiles = walk(join(root, "src")).filter(path => path.endsWith(".js"));
   for (const file of sourceFiles) {
@@ -52,14 +52,13 @@ test("packaged JSON is valid and the extension has no unsafe HTML execution APIs
   }
 });
 
-test("provider permissions are direct and contain no localhost backend access", () => {
-  assert.ok(manifest.host_permissions.includes("https://generativelanguage.googleapis.com/*") || manifest.optional_host_permissions?.includes("https://generativelanguage.googleapis.com/*"));
-  assert.ok(manifest.optional_host_permissions.includes("https://generativelanguage.googleapis.com/*"));
-  assert.ok(manifest.host_permissions.includes("https://www.googleapis.com/*"));
+test("extension only requests YouTube access and supports the two selected modes", () => {
   assert.ok(manifest.host_permissions.includes("https://www.youtube.com/*"));
+  assert.equal(manifest.host_permissions.length, 1);
+  assert.equal(manifest.optional_host_permissions, undefined);
   assert.ok(manifest.permissions.includes("scripting"));
   assert.match(readFileSync(join(root, "src/background/retrieval/youtube-tab-fetch.js"), "utf8"), /world: "MAIN"/);
-  assert.doesNotMatch(JSON.stringify(manifest), /127\.0\.0\.1|localhost/);
   const bundled = readFileSync(join(root, "src/content/focustube.bundle.js"), "utf8");
-  assert.doesNotMatch(bundled, /127\.0\.0\.1|BACKEND_HEALTH|backend-managed/);
+  assert.doesNotMatch(bundled, /generativelanguage\.googleapis\.com|www\.googleapis\.com|Interest|Curiosity/);
+  assert.match(bundled, /LOCAL FILTERING/);
 });
