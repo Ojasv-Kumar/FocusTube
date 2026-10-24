@@ -7,4 +7,34 @@ html[data-focustube-mode="picker"] ytd-app { visibility: hidden !important; }
 focustube-picker-host { position: fixed !important; inset: 0 !important; z-index: 2147483647 !important; display: block !important; }
 focustube-switcher-host { position: fixed !important; right: 18px !important; bottom: 18px !important; z-index: 2147483000 !important; display: block !important; }
 focustube-results-host,
-focustube-home-host { display: block !important; }
+focustube-home-host,
+focustube-search-host { display: block !important; }
+
+/* YouTube's Shorts shelf markup varies across search/home layouts. Hide the shelf,
+   its containing section/heading, result cards and navigation entry in Learn mode. */
+html[data-focustube-mode="learn"] ytd-reel-shelf-renderer,
+html[data-focustube-mode="learn"] ytd-rich-shelf-renderer[is-shorts],
+html[data-focustube-mode="learn"] ytd-reel-item-renderer,
+html[data-focustube-mode="learn"] ytd-shorts,
+html[data-focustube-mode="learn"] ytm-shorts-lockup-view-model,
+html[data-focustube-mode="learn"] ytd-rich-section-renderer:has(ytd-reel-shelf-renderer),
+html[data-focustube-mode="learn"] ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]),
+html[data-focustube-mode="learn"] ytd-item-section-renderer:has(ytd-reel-shelf-renderer),
+html[data-focustube-mode="learn"] ytd-item-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]),
+html[data-focustube-mode="learn"] ytd-shelf-renderer:has(a[href^="/shorts/"]),
+html[data-focustube-mode="learn"] ytd-rich-section-renderer:has(a[href^="/shorts/"]),
+html[data-focustube-mode="learn"] ytd-rich-item-renderer:has(a[href^="/shorts/"]),
+html[data-focustube-mode="learn"] ytd-video-renderer:has(a[href^="/shorts/"]),
+html[data-focustube-mode="learn"] ytd-guide-entry-renderer:has(a[href^="/shorts"]),
+html[data-focustube-mode="learn"] ytd-mini-guide-entry-renderer:has(a[href^="/shorts"]),
+html[data-focustube-mode="learn"] a[href="/shorts"],
+html[data-focustube-mode="learn"] a[href^="/shorts/"] { display: none !important; }
+
+/* Shorts chips are sometimes ordinary light-DOM nodes; the content script also
+   hides matching nodes inside open YouTube shadow roots and restores them on mode exit. */
+html[data-focustube-mode="learn"] [data-focustube-shorts-hidden="true"],
+html[data-focustube-mode="learn"] [data-focustube-shorts-chip="true"] { display:none!important; }
+html[data-focustube-mode="learn"] ytd-masthead ytd-searchbox,
+html[data-focustube-mode="learn"] ytd-masthead #search-form,
+html[data-focustube-mode="learn"] ytd-masthead #voice-search-button,
+html[data-focustube-mode="learn"] ytd-masthead #search-icon-legacy { display:none!important; }

@@ -1,0 +1,149 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createYouTubeTabFetch } from "../src/background/retrieval/youtube-tab-fetch.js";
+
+class MemoryStorage {
+  constructor() { this.values = new Map(); }
+  async get(key = null) {
+    if (key === null) return Object.fromEntries(this.values);
+    return typeof key === "string" && this.values.has(key) ? { [key]: this.values.get(key) } : {};
+  }
+  async set(values) { for (const [key, value] of Object.entries(values)) this.values.set(key, value); }
+  async remove(keys) { for (const key of Array.isArray(keys) ? keys : [keys]) this.values.delete(key); }
+}
+
+function searchHtml(id = "robotics-video") {
+  const renderer = { videoRenderer: {
+    videoId: id,
+    title: { simpleText: "Robotics explained with a practical demonstration" },
+    lengthText: { simpleText: "12:34" },
+    ownerText: { runs: [{ text: "Engineering Channel" }] },
+    navigationEndpoint: { commandMetadata: { webCommandMetadata: { url: `/watch?v=${id}` } } }
+  } };
+  return `ytInitialData = ${JSON.stringify({ items: [renderer] })};`;
+}
+
+test("API-only preference falls back to YouTube HTML after API failure", async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.chrome = { storage: { local: new MemoryStorage() } };
+  globalThis.fetch = async url => String(url).includes("googleapis.com/youtube/v3/search")
+    ? { ok: false, status: 403, json: async () => ({ error: { code: 403, errors: [{ reason: "keyInvalid" }] } }) }
+    : { ok: true, status: 200, text: async () => searchHtml() };
+  try {
+    const { retrieveQueries } = await import("../src/background/retrieval/index.js");
+    const result = await retrieveQueries(["robotics"], { retrievalProvider: "api", youtubeApiKey: "invalid-test-key" });
+    assert.deepEqual(result.providers, ["html"]);
+    assert.equal(result.videos[0]?.id, "robotics-video");
+    assert.equal(result.error, null);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test("YouTube-tab HTML fallback is used after the API request fails", async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.chrome = { storage: { local: new MemoryStorage() } };
+  let pageFetches = 0;
+  globalThis.fetch = async () => { throw new Error("worker fetch should not be used"); };
+  try {
+    const { retrieveQueries } = await import("../src/background/retrieval/index.js");
+    const result = await retrieveQueries(["robotics"], { retrievalProvider: "api", youtubeApiKey: "valid-looking-key" }, {
+      htmlFetchImpl: async () => {
+        pageFetches += 1;
+        return { ok: true, status: 200, text: async () => searchHtml("page-world-video") };
+      }
+    });
+    assert.equal(pageFetches, 1);
+    assert.deepEqual(result.providers, ["html"]);
+    assert.equal(result.videos[0]?.id, "page-world-video");
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test("YouTube page fetch uses the MAIN world and falls back if injection is rejected", async () => {
+  let injected;
+  let fallbackCalls = 0;
+  const fetchImpl = createYouTubeTabFetch({
+    tabId: 42,
+    scripting: { executeScript: async details => { injected = details; return [{ result: { ok: true, status: 200, html: "page html" } }]; } },
+    fallbackFetch: async () => { fallbackCalls += 1; return { ok: true, status: 200, text: async () => "fallback html" }; }
+  });
+  const response = await fetchImpl("https://www.youtube.com/results?search_query=robotics");
+  assert.equal(injected.target.tabId, 42);
+  assert.equal(injected.world, "MAIN");
+  assert.equal(await response.text(), "page html");
+  assert.equal(fallbackCalls, 0);
+
+  const fallback = createYouTubeTabFetch({
+    tabId: 42, scripting: { executeScript: async () => { throw new Error("injection denied"); } },
+    fallbackFetch: async () => { fallbackCalls += 1; return { ok: true, status: 200 }; }
+  });
+  await fallback("https://www.youtube.com/results?search_query=robotics");
+  assert.equal(fallbackCalls, 1);
+  await assert.rejects(fetchImpl("https://example.com/search"), /only fetches YouTube/);
+});
+
+test("retrieval reports the exact failing source instead of blaming the AI backend", async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.chrome = { storage: { local: new MemoryStorage() } };
+  globalThis.fetch = async url => {
+    if (String(url).includes("googleapis.com/youtube/v3/search")) {
+      return { ok: false, status: 403, json: async () => ({ error: { code: 403, errors: [{ reason: "keyInvalid" }] } }) };
+    }
+    throw new TypeError("Network request blocked");
+  };
+  try {
+    const [{ retrieveQueries }, { friendlyError }] = await Promise.all([
+      import("../src/background/retrieval/index.js"), import("../src/errors.js")
+    ]);
+    const result = await retrieveQueries(["robotics"], { retrievalProvider: "api", youtubeApiKey: "invalid-test-key" });
+    assert.equal(result.error?.code, "YOUTUBE_HTML_FETCH_FAILED");
+    assert.deepEqual(result.error?.providerFailures, [
+      { provider: "api", code: "CONFIG_ERROR" },
+      { provider: "html", code: "YOUTUBE_HTML_FETCH_FAILED"}
+    ]);
+    const mapped = friendlyError(result.error);
+    assert.match(mapped.userMessage, /could not fetch YouTube search/i);
+    assert.match(mapped.userMessage, /api: CONFIG_ERROR; html: YOUTUBE_HTML_FETCH_FAILED/);
+    assert.doesNotMatch(mapped.userMessage, /local AI backend/);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+for (const mode of ["interest", "curiosity"]) {
+  test(`${mode} keeps retrieved videos when AI ranking is unavailable`, async () => {
+    const previousFetch = globalThis.fetch;
+    const storage = new MemoryStorage();
+    globalThis.chrome = {
+      runtime: { getURL: path => `chrome-extension://test/${path}` },
+      storage: { local: storage }
+    };
+    globalThis.fetch = async url => {
+      if (String(url).includes("curiosity-seed-channels.json")) {
+        return { ok: true, status: 200, json: async () => [{ name: "PBS Space Time" }] };
+      }
+      if (String(url).includes("/api/chat")) throw new TypeError("Remote Ollama bridge intentionally unavailable in this test");
+      return { ok: true, status: 200, text: async () => searchHtml() };
+    };
+    try {
+      const [{ runPipeline }, { Cache }] = await Promise.all([
+        import("../src/background/pipeline.js"), import("../src/background/cache.js")
+      ]);
+      const result = await runPipeline(
+        { mode, query: "", interest: "robotics", action: "home" },
+        { retrievalProvider: "html", mockMode: false, resultsPerSearch: 8, curiosityStrictness: "balanced" },
+        { cache: new Cache(storage), correlationId: `fallback-${mode}` }
+      );
+      assert.equal(result.ok, true);
+      assert.equal(result.videos[0]?.id, "robotics-video");
+      assert.equal(result.metadata.degraded, true);
+      assert.match(result.metadata.fallbackLabel, /unranked YouTube search matches/);
+      assert.match(result.metadata.fallbackLabel, /TIMEOUT_ERROR|NETWORK_ERROR|INVALID_OLLAMA_ENDPOINT|MISSING_OLLAMA_TOKEN|OLLAMA/i);
+      assert.match(result.metadata.fallbackLabel, /Ollama|bridge|network|reach/i);
+      assert.match(result.videos[0].reason, /not AI-ranked/);
+    } finally { globalThis.fetch = previousFetch; }
+  });
+}
+
+test("picker host rules preserve the fixed overlay layout", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const css = await readFile(new URL("../src/content/hide.css", import.meta.url), "utf8");
+  assert.doesNotMatch(css, /focustube-picker-host[^}]*all:\s*initial/s);
+  assert.match(css, /focustube-picker-host\s*\{[^}]*position:\s*fixed\s*!important/s);
+});
