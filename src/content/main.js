@@ -110,7 +110,7 @@ async function applyPageBehavior(reason = "navigation") {
       if (!result || !resultsUI) return;
       if (result.ok) resultsUI.renderResults(result); else resultsUI.renderError(result.userMessage || "No relevant videos were found.");
     };
-    resultsUI = createResultsUI({ query, parent: anchor, onRetry: () => void retry() });
+    resultsUI = createResultsUI({ query, parent: anchor, onRetry: () => void retry(), onOriginalChange: original => { if (original) requestToken += 1; } });
     if (!resultsUI) return;
     resultsUI.renderSkeleton();
     const result = await makePipelineRequest(query, token);

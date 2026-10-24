@@ -738,7 +738,9 @@
         if (result2.ok) resultsUI.renderResults(result2);
         else resultsUI.renderError(result2.userMessage || "No relevant videos were found.");
       };
-      resultsUI = createResultsUI({ query, parent: anchor, onRetry: () => void retry() });
+      resultsUI = createResultsUI({ query, parent: anchor, onRetry: () => void retry(), onOriginalChange: (original) => {
+        if (original) requestToken += 1;
+      } });
       if (!resultsUI) return;
       resultsUI.renderSkeleton();
       const result = await makePipelineRequest(query, token);

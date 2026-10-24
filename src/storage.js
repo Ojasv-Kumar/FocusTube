@@ -4,14 +4,16 @@ export const DEFAULT_SETTINGS = Object.freeze({
   activeMode: null,
   hideCommentsInLearn: CONFIG.Settings.hideCommentsInLearn,
   hideSubscriptionsInLearn: CONFIG.Settings.hideSubscriptionsInLearn,
-  theme: CONFIG.Settings.theme
+  theme: CONFIG.Settings.theme,
+  cameraEnabled: false,
+  cameraCalibration: null
 });
 
 const obsoleteKeys = [
   "youtubeApiKey", "geminiApiKeys", "geminiFastModel", "geminiSmartModel", "geminiFallbackModels",
   "retrievalProvider", "llmApiKey", "llmBaseUrl", "fastModel", "smartModel", "focustube.apiQuota",
   "interestText", "defaultInterestTopic", "curiosityStrictness", "mockMode", "debugLogging", "showReasons",
-  "hideShortsInLearn", "disableAutoplayInLearn", "keepCommentsVisible", "density", "askForModeEveryTab", "resultsPerSearch"
+  "hideShortsInLearn", "disableAutoplayInLearn", "keepCommentsVisible", "density", "askForModeEveryTab", "resultsPerSearch", "cameraTelemetryConsent"
 ];
 
 export function validateSettings(input = {}) {
@@ -20,6 +22,12 @@ export function validateSettings(input = {}) {
   if (typeof input.hideCommentsInLearn === "boolean") out.hideCommentsInLearn = input.hideCommentsInLearn;
   if (typeof input.hideSubscriptionsInLearn === "boolean") out.hideSubscriptionsInLearn = input.hideSubscriptionsInLearn;
   if (["dark", "light"].includes(input.theme)) out.theme = input.theme;
+  if (typeof input.cameraEnabled === "boolean") out.cameraEnabled = input.cameraEnabled;
+  const calibration = input.cameraCalibration;
+  if (calibration && calibration.version === 1 && Number.isFinite(calibration.yaw) && Number.isFinite(calibration.pitch)) {
+    out.cameraCalibration = { version: 1, yaw: calibration.yaw, pitch: calibration.pitch };
+  }
+  if (!out.cameraCalibration) out.cameraEnabled = false;
   return out;
 }
 
