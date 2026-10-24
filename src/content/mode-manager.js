@@ -16,7 +16,7 @@ export function applyMode(mode, settings = {}) {
   const root = document.documentElement;
   if (!root) return;
   const safeMode = Object.hasOwn(CONFIG.Modes, mode) ? mode : "relax";
-  applyTheme(settings.theme || root.dataset.focustubeTheme || CONFIG.Settings.theme);
+  applyTheme(settings.theme || root.dataset.focustubeTheme || "dark");
   if (safeMode === "relax") {
     root.removeAttribute("data-focustube-mode");
     root.removeAttribute("data-focustube-page");
@@ -30,16 +30,20 @@ export function applyMode(mode, settings = {}) {
   }
   ensureStyle();
   root.dataset.focustubeMode = safeMode;
+  if (safeMode === "learn" && settings.hideShortsInLearn !== false) root.dataset.focustubeHideShorts = "true";
+  else root.removeAttribute("data-focustube-hide-shorts");
   if (safeMode === "learn" && settings.hideCommentsInLearn) root.dataset.focustubeHideComments = "true";
   else root.removeAttribute("data-focustube-hide-comments");
-  if (safeMode === "learn" && settings.hideSubscriptionsInLearn) root.dataset.focustubeHideSubscriptions = "true";
+  if (safeMode === "learn" && settings.hideSubscriptionsInLearn !== false) root.dataset.focustubeHideSubscriptions = "true";
   else root.removeAttribute("data-focustube-hide-subscriptions");
 }
 export function applyTheme(theme = "dark") {
+  const value = theme === "light" ? "light" : "dark";
   const root = document.documentElement;
   if (!root) return;
-  root.dataset.focustubeTheme = theme === "light" ? "light" : "dark";
-  for (const host of document.querySelectorAll("focustube-picker-host,focustube-switcher-host,focustube-home-host,focustube-results-host")) host.dataset.theme = root.dataset.focustubeTheme;
+  root.dataset.focustubeTheme = value;
+  root.dataset.theme = value;
+  for (const host of document.querySelectorAll("focustube-picker-host,focustube-switcher-host,focustube-home-host,focustube-results-host,focustube-search-host")) host.dataset.theme = value;
 }
 export function setPageType(pageType, mode = "relax") {
   if (!document.documentElement) return;

@@ -1,57 +1,74 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { locallyRankVideos, runPipeline } from "../src/background/pipeline.js";
-import { Cache } from "../src/background/cache.js";
-import { HtmlProvider } from "../src/background/retrieval/html-provider.js";
 
 class MemoryStorage {
   constructor() { this.values = new Map(); }
-  async get(key = null) { if (key === null) return Object.fromEntries(this.values); return this.values.has(key) ? { [key]: this.values.get(key) } : {}; }
+  async get(key = null) {
+    if (key === null) return Object.fromEntries(this.values);
+    if (typeof key === "string") return this.values.has(key) ? { [key]: this.values.get(key) } : {};
+    return {};
+  }
   async set(values) { for (const [key, value] of Object.entries(values)) this.values.set(key, value); }
   async remove(keys) { for (const key of Array.isArray(keys) ? keys : [keys]) this.values.delete(key); }
 }
-const renderer = (id, title, endpoint = `/watch?v=${id}`, duration = "12:34") => ({ videoRenderer: { videoId: id, title: { simpleText: title }, lengthText: { simpleText: duration }, ownerText: { runs: [{ text: "Learning Channel" }] }, navigationEndpoint: { commandMetadata: { webCommandMetadata: { url: endpoint } } } } });
 
-test("local ranking filters unrelated results by title and description metadata", () => {
-  const result = locallyRankVideos([
-    { id: "a", title: "Copilot basics for beginners", description: "Learn to use GitHub Copilot", channelName: "Code school" },
-    { id: "b", title: "Build a Copilot coding project", description: "A hands-on GitHub Copilot example" },
-    { id: "c", title: "Celebrity news this week", description: "Entertainment roundup" }
-  ], "Copilot basics", 8);
-  assert.deepEqual(result.map(row => row.id), ["a", "b"]);
-  assert.ok(result[0].relevance >= result[1].relevance);
-  assert.ok(result.every(row => !("role" in row) && !("reason" in row)));
-});
+function renderer(id, title, duration, endpoint = `/watch?v=${id}`) {
+  return { videoRenderer: {
+    videoId: id,
+    title: { simpleText: title },
+    lengthText: { simpleText: duration },
+    ownerText: { runs: [{ text: "Engineering Channel" }] },
+    navigationEndpoint: { commandMetadata: { webCommandMetadata: { url: endpoint } } }
+  } };
+}
 
-test("YouTube HTML retrieval only extracts regular video results, never playlist or Shorts shelves", async () => {
-  const data = { contents: { twoColumnSearchResultsRenderer: { primaryContents: { sectionListRenderer: { contents: [
-    { itemSectionRenderer: { contents: [renderer("normal", "Copilot basics explained"), { playlistRenderer: { title: { simpleText: "Copilot playlist" } } }] } },
-    { reelShelfRenderer: { contents: [renderer("short-shelf", "Copilot quick tip", "/shorts/short-shelf", "0:30")] } }
-  ] } } } } };
-  const provider = new HtmlProvider({ fetchImpl: async () => ({ ok: true, text: async () => `ytInitialData = ${JSON.stringify(data)};` }) });
-  const rows = await provider.search("Copilot basics");
-  assert.deepEqual(rows.map(row => row.id), ["normal"]);
-});
+test("Learn pipeline ranks only its candidate pool and excludes likely Shorts", async () => {
+  const local = new MemoryStorage();
+  globalThis.chrome = {
+    runtime: { getURL: path => `chrome-extension://test/${path}` },
+    storage: { local },
+    permissions: { contains: async () => true }
+  };
+  const html = `ytInitialData = ${JSON.stringify({ items: [
+    renderer("long-one", "Backpropagation explained", "12:34"),
+    renderer("short-duration", "Quick backpropagation tip", "2:55"),
+    renderer("short-route", "Backpropagation clip", "5:00", "/shorts/short-route")
+  ]})};`;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    if (String(url).endsWith("/api/chat")) {
+      const request = JSON.parse(init.body);
+      const user = request.messages.at(-1).content;
+      const system = request.messages.find(message => message.role === "system")?.content || "";
+      calls.push({ user, system });
+      const result = system.includes("planning focused learning searches")
+        ? { queries: ["Backpropagation intuition", "Backpropagation derivation"] }
+        : { videos: [{ i: 0, fit: 0.94, q: 0.9, role: "intro", w: "Clear step-by-step explanation" }] };
+      return { ok: true, status: 200, json: async () => ({ message: { content: JSON.stringify(result) }, done: true }), headers: new Headers() };
+    }
+    return { ok: true, status: 200, text: async () => html };
+  };
 
-test("Learn pipeline uses YouTube HTML results and separates original matches from related searches", async () => {
-  const storage = new MemoryStorage();
-  const dataByQuery = [
-    { items: [renderer("relevant", "Copilot basics explained for beginners"), renderer("unrelated", "Celebrity news roundup")] },
-    { items: [renderer("related-explained", "Copilot basics explained with examples")] },
-    { items: [renderer("related-tutorial", "Copilot basics tutorial and coding workflow")] }
-  ];
-  let requests = 0;
-  const htmlFetchImpl = async () => { const data = dataByQuery[requests++]; return { ok: true, text: async () => `ytInitialData = ${JSON.stringify(data)};` }; };
-  const result = await runPipeline({ mode: "learn", query: "Copilot basics" }, { resultsPerSearch: 8 }, { cache: new Cache(storage), htmlFetchImpl });
+  const { runPipeline } = await import("../src/background/pipeline.js");
+  const { Cache } = await import("../src/background/cache.js");
+  const result = await runPipeline(
+    { mode: "learn", query: "Backpropagation", action: "search" },
+    { ollamaEndpoint: "https://192.168.1.42:11435", ollamaToken: "a".repeat(64), ollamaModel: "qwen3:8b", retrievalProvider: "html", youtubeApiKey: "", mockMode: false },
+    { cache: new Cache(local), correlationId: "integration" }
+  );
+
   assert.equal(result.ok, true);
-  assert.equal(result.metadata.ranking, "local");
-  assert.deepEqual(result.videos.map(row => [row.id, row.group]), [["relevant", "relevant"], ["related-explained", "related"], ["related-tutorial", "related"]]);
-  assert.equal(requests, 3);
-});
+  assert.equal(result.metadata.degraded, false);
+  assert.equal(result.videos.length, 1);
+  assert.equal(result.videos[0].id, "long-one");
+  assert.equal(result.videos[0].role, "intro");
+  assert.equal(calls.length, 2, "one expansion call and one judge call should complete");
+  assert.doesNotMatch(calls[1].user, /short-duration|short-route/);
 
-test("pipeline rejects unsupported modes without making network requests", async () => {
-  let requests = 0;
-  const result = await runPipeline({ mode: "unsupported", query: "anything" }, {}, { cache: new Cache(new MemoryStorage()), htmlFetchImpl: async () => { requests += 1; } });
-  assert.equal(result.ok, true);
-  assert.equal(requests, 0);
+  globalThis.fetch = async url => String(url).endsWith("/api/chat")
+    ? { ok: false, status: 503, json: async () => ({ error: "Unavailable" }) }
+    : { ok: true, status: 200, text: async () => html };
+  const fallback = await runPipeline({ mode: "learn", query: "Backpropagation fallback", action: "search" }, { mockMode: false }, { cache: new Cache(local), correlationId: "fallback" });
+  assert.equal(fallback.ok, false);
+  assert.match(fallback.userMessage, /explicitly choose original YouTube results/);
 });

@@ -1,29 +1,37 @@
-# FocusTube
+# FocusTube 3.0.0
 
-FocusTube is a no-build Chrome extension for YouTube with two modes: **Learn** and **Relax**. It uses no AI provider, API keys, backend, or local server. Its optional camera assist bundles MediaPipe locally and blocks MediaPipe's optional external usage metrics; camera frames stay on the device. Search retrieval still uses YouTube.
+FocusTube is a Chromium extension that offers **Learn**, **Interest**, **Curiosity**, and **Relax** modes. Learn, Interest, and Curiosity use a local Ollama model to expand topics and rank YouTube Data API or HTML search results. Relax restores native YouTube. The optional MediaPipe camera feature provides attention alerts in Learn and open-palm pause/play control in all four modes.
 
 ## Install or update
 
-1. Open `chrome://extensions` and turn on **Developer mode**.
-2. Select **Load unpacked** and choose this project folder, the one containing this `manifest.json`.
-3. After an update, click the extension’s **Reload** button and refresh YouTube tabs.
-4. Choose Learn or Relax in the first-run picker or extension popup.
+1. Open `brave://extensions` or `chrome://extensions` and enable Developer mode.
+2. Click **Load unpacked** and select this repository folder, the one containing `manifest.json`.
+3. After code changes, click the extension’s **Reload** button and refresh YouTube tabs.
+4. Configure the YouTube Data API key and Ollama endpoint/model under **FocusTube → Options**.
 
-To update another computer, copy the latest project folder there, then use **Load unpacked** to select that folder (or replace the old folder and click **Reload**). Unpacked extension files do not sync between computers.
+Unpacked extension folders do not sync between computers; copy the updated folder and load/reload it on each browser profile.
 
 ## Modes
 
-- **Learn:** removes the home feed, Shorts, Trending/Explore links, watch-page recommendations, end-screen cards, the masthead search field, search filter chips, and notification bell. The home page presents a focused search prompt. Search keeps regular video results only and locally filters them into **Relevant matches** from the exact search and **Related searches** from deterministic “explained” and “tutorial” query expansions. Cards show only the video and its metadata; there is no AI ranking or per-video role/reason label. Original YouTube results remain available from the results panel.
-- **Relax:** removes FocusTube’s page changes and returns to normal YouTube.
+- **Learn:** removes the home feed, Shorts, Trending/Explore links, watch-page recommendations, end-screen cards, YouTube’s masthead search field, search filter chips, and notification bell. It provides its own search field. Search results are regular videos only, split into **Relevant videos** and **Related searches**. It hides unrelated results and keeps comments/subscriptions according to the Learn settings. The original YouTube result list can be shown from the results panel.
+- **Interest:** creates a topic-centered feed and ranks results for the chosen interest.
+- **Curiosity:** rotates through varied topics and ranks results for substance and relevance.
+- **Relax:** disables FocusTube’s feed/search changes and returns to native YouTube.
 
-The Settings page contains only Learn comments visibility, Learn Subscriptions visibility, and FocusTube’s dark/light appearance. Earlier saved API keys are removed from extension storage during migration.
+The camera open-palm gesture can pause or resume regular videos in every mode. It does not run on Shorts. Face-missing and looking-away alerts are for Learn mode only; they pause playback and stay visible until the user resumes. Camera frames are processed locally by the bundled MediaPipe runtime.
 
-## Optional camera attention assist
+## APIs and Ollama
 
-Open **Settings → Set up camera and calibration**, review and accept the MediaPipe metrics notice, then grant camera permission and complete the 3-second calibration. Camera analysis runs only on the active, visible YouTube video in Learn or Relax. Face-missing and looking-away alerts are limited to Learn mode and include a soft chime and cooldown. An open palm toggles playback in either mode after a brief hold (about 0.2 seconds); Shorts are excluded. If you pause using the player, camera monitoring stops; if an open-palm gesture pauses the video, hand recognition stays active so you can gesture to resume it. Disable the setting or revoke the browser camera permission to stop access.
+Set a YouTube Data API key in Options to use `search.list`; without it, retrieval uses the HTML search provider. YouTube API access is optional and can be tested in Options.
 
-The extension includes the MediaPipe Tasks Vision 1.1.1 runtime, WASM files, and task models under `vendor/mediapipe/`; no build or network download is needed. The extension's policy allows extension pages to connect only to extension files and YouTube, so MediaPipe's optional Google metrics endpoint is blocked. The runtime is Apache-2.0 licensed. MediaPipe's published privacy notice explains its on-device frame processing and its separate usage/performance metrics collection: https://developers.google.com/edge/mediapipe/solutions/tasks.
+For Ollama running on this computer, set its endpoint and model in Options. For a model running on another computer, use the included `remote-ollama-bridge` setup described in [OLLAMA-REMOTE-SETUP.md](OLLAMA-REMOTE-SETUP.md). The bridge must be reachable over trusted private Wi-Fi with HTTPS and a token. Never commit API keys, bridge tokens, or private certificates.
+
+The Ollama model does the query expansion and relevance ranking for Learn, Interest, and Curiosity. If Ollama is unavailable, FocusTube reports a degraded result and falls back to its non-AI relevance rules; it does not send prompts to a cloud model.
+
+## Settings
+
+Settings include the Learn comments/subscriptions switches, light/dark appearance, camera enable/setup, Ollama connection, YouTube Data API key, feed size, and diagnostics. Camera setup requests permission in an extension-owned page and includes calibration.
 
 ## Verification
 
-Run `npm test` with Node.js. Tests cover local relevance ranking, video-only extraction, Shorts shelf exclusion, mode/settings validation, and package permissions. YouTube changes its private search-page data format, so HTML parsing can need maintenance. A network or consent failure leaves the original YouTube results available.
+Run `npm test` with Node.js. Tests cover pipeline ranking, retrieval behavior, Ollama requests, settings, and package integrity. Live YouTube, API-key quota, Ollama host availability, and camera hardware behavior depend on the current browser and network, so validate those in the target browser after loading the unpacked folder.

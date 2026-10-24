@@ -1,5 +1,6 @@
 import { CONFIG } from "../../config.js";
 import { NetworkError } from "../../errors.js";
+import { fetchWithTimeout, globalFetch, promiseWithTimeout } from "../network.js";
 
 /* YouTube embeds private initial data in its HTML. VERIFY IN LIVE BROWSER. */
 export function parseClockDuration(text) {
@@ -44,12 +45,7 @@ function collectRenderers(root, output = []) {
   if (root.videoRenderer) output.push(root.videoRenderer);
   for (const value of Object.values(root)) {
     if (Array.isArray(value)) for (const child of value) collectRenderers(child, output);
-    else if (value && typeof value === "object") {
-      // Shorts are wrapped in reel shelves/cards. Do not traverse those trees,
-      // which avoids rendering empty Shorts placeholders as regular videos.
-      if (value.reelShelfRenderer || value.reelItemRenderer || value.shortsLockupViewModel) continue;
-      collectRenderers(value, output);
-    }
+    else if (value && typeof value === "object") collectRenderers(value, output);
   }
   return output;
 }
@@ -68,23 +64,32 @@ export function normalizeRenderer(renderer) {
     durationSeconds, viewCount: parseViewCount(viewText), publishedText: textValue(renderer.publishedTimeText), publishedAt: null,
     description: textValue(renderer.detailedMetadataSnippets?.[0]?.snippetText).slice(0, CONFIG.Pipeline.maxDescriptionChars),
     thumbnailUrl: thumbnail.at(-1)?.url || "", isLive: /live|premiere|streaming/.test(liveText),
-    isShort: endpoint.startsWith("/shorts/")
+    isShort: endpoint.startsWith("/shorts/") || (durationSeconds !== null && durationSeconds <= CONFIG.Pipeline.shortsMaxDurationSeconds)
   };
 }
 export class HtmlProvider {
-  constructor({ fetchImpl = fetch } = {}) { this.fetch = fetchImpl; }
+  constructor({ fetchImpl = globalFetch, timeoutMs = CONFIG.Retrieval.requestTimeoutMs } = {}) {
+    this.fetch = fetchImpl;
+    this.timeoutMs = timeoutMs;
+  }
   async search(query, options = {}) {
     const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(String(query || "").trim())}`;
     let response;
-    try { response = await this.fetch(url, { method: "GET", credentials: "omit", cache: "no-store" }); }
-    catch (cause) {
+    try {
+      response = await fetchWithTimeout(this.fetch, url, { method: "GET", credentials: "omit", cache: "no-store" }, this.timeoutMs, "YouTube search request");
+    } catch (cause) {
+      if (cause?.code === "TIMEOUT_ERROR") {
+        cause.code = "YOUTUBE_HTML_TIMEOUT";
+        throw cause;
+      }
       const error = new NetworkError("Could not retrieve YouTube search in this browser.", { cause });
       error.code = "YOUTUBE_HTML_FETCH_FAILED";
       throw error;
     }
     let html;
-    try { html = await response.text(); }
-    catch {
+    try { html = await promiseWithTimeout(response.text(), this.timeoutMs, "YouTube search response"); }
+    catch (cause) {
+      if (cause?.code === "TIMEOUT_ERROR") { cause.code = "YOUTUBE_HTML_TIMEOUT"; throw cause; }
       const error = new NetworkError("YouTube returned unreadable search data.");
       error.code = "YOUTUBE_HTML_INVALID";
       throw error;
@@ -106,10 +111,7 @@ export class HtmlProvider {
       error.code = "YOUTUBE_HTML_PARSE_FAILED";
       throw error;
     }
-    const renderers = collectRenderers(data).filter(renderer => {
-      const endpoint = renderer.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url || "";
-      return !endpoint.startsWith("/shorts/");
-    });
+    const renderers = collectRenderers(data);
     const limit = options.maxResults || CONFIG.Pipeline.resultsPerQuery;
     return renderers.map(normalizeRenderer).filter(video => video.id && video.title).slice(0, limit);
   }

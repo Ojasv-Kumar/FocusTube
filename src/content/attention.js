@@ -80,11 +80,16 @@
     scrim.className = "scrim"; scrim.setAttribute("aria-hidden", "true");
     card.className = "dialog"; card.setAttribute("aria-modal", "false");
     brand.className = "brand"; mark.className = "mark"; mark.textContent = "F"; label.textContent = "FOCUSTUBE"; state.className = "state"; state.textContent = "PLAYBACK PAUSED"; brand.append(mark, label, state);
-    symbol.className = "symbol"; symbol.setAttribute("aria-hidden", "true"); symbol.innerHTML = '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2"/><path d="M12 7v5l3 2"/></svg>';
+    const makeSvg = (width, height, viewBox, fill = "none") => { const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.setAttribute("width", String(width)); svg.setAttribute("height", String(height)); svg.setAttribute("viewBox", viewBox); svg.setAttribute("fill", fill); svg.setAttribute("aria-hidden", "true"); return svg; };
+    symbol.className = "symbol"; symbol.setAttribute("aria-hidden", "true");
+    const clockIcon = makeSvg(30, 30, "0 0 24 24"); clockIcon.setAttribute("stroke", "currentColor"); clockIcon.setAttribute("stroke-width", "1.8"); clockIcon.setAttribute("stroke-linecap", "round"); clockIcon.setAttribute("stroke-linejoin", "round");
+    const clockFace = document.createElementNS("http://www.w3.org/2000/svg", "circle"); clockFace.setAttribute("cx", "12"); clockFace.setAttribute("cy", "12"); clockFace.setAttribute("r", "9.2");
+    const clockHands = document.createElementNS("http://www.w3.org/2000/svg", "path"); clockHands.setAttribute("d", "M12 7v5l3 2"); clockIcon.append(clockFace, clockHands); symbol.append(clockIcon);
     heading.textContent = kind === "camera-error" ? "Camera check needed" : "Take a moment to refocus";
     message.textContent = text;
     rule.className = "rule"; actions.className = "actions";
-    resume.type = "button"; resume.setAttribute("aria-label", "Resume the paused video and close the FocusTube alert"); resume.innerHTML = 'Resume video <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.8c0-.8.9-1.3 1.6-.9l9 6.2a1.1 1.1 0 0 1 0 1.8l-9 6.2c-.7.5-1.6-.1-1.6-.9z"/></svg>';
+    resume.type = "button"; resume.setAttribute("aria-label", "Resume the paused video and close the FocusTube alert"); resume.append(document.createTextNode("Resume video "));
+    const playIcon = makeSvg(18, 18, "0 0 24 24", "currentColor"); const playPath = document.createElementNS("http://www.w3.org/2000/svg", "path"); playPath.setAttribute("d", "M8 5.8c0-.8.9-1.3 1.6-.9l9 6.2a1.1 1.1 0 0 1 0 1.8l-9 6.2c-.7.5-1.6-.1-1.6-.9z"); playIcon.append(playPath); resume.append(playIcon);
     resume.addEventListener("click", () => { if (video?.paused) void video.play().catch(() => {}); else handlePlaybackStarted(); });
     if (kind === "camera-error") {
       setup.type = "button"; setup.className = "secondary"; setup.textContent = "Open camera setup";
@@ -131,7 +136,7 @@
     if (area !== "local") return;
     if (changes.activeMode) activeMode = changes.activeMode.newValue || "relax";
     if (changes.cameraEnabled) cameraEnabled = changes.cameraEnabled.newValue === true;
-    lastState = ""; if (activeMode !== "learn" || !cameraEnabled) gesturePaused = false;
+    lastState = ""; if (!cameraEnabled) gesturePaused = false;
     tellWorker();
   });
   for (const event of ["yt-navigate-start", "yt-navigate-finish", "popstate", "focus", "blur"]) window.addEventListener(event, () => { lastState = ""; if (!onWatchPage()) { gesturePaused = false; clearWarning(); } tellWorker(); });

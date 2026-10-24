@@ -3,13 +3,13 @@ import { SELECTORS, queryFirst } from "../selectors.js";
 import { createHost, addStyle, element, button, componentCss, formatViews, formatDuration, safeRemove } from "./ui-kit.js";
 import { setCuratedSearch } from "./mode-manager.js";
 
-const RESULTS_CSS = `:host{display:block;width:100%;min-width:0;max-width:1120px;box-sizing:border-box;overflow:hidden;position:relative}.wrap{width:100%;min-width:0;max-width:1120px;box-sizing:border-box;overflow:hidden;margin:28px auto 60px;padding:22px 24px;background:#f8faf8;border:1px solid #e1e8e2;border-radius:22px;box-shadow:0 10px 35px #193a2810}.wrap.compact{padding:14px 16px}.wrap.compact .body{padding:9px 11px}.wrap.compact .groupHeading{margin:18px 0 8px}.header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:22px}.title{margin:4px 0 4px;font-size:26px;line-height:1.2;letter-spacing:-.025em;color:#183a2c}.query{margin:0;color:#69766f}.actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.groupHeading{margin:28px 0 12px;font-size:22px;color:#183a2c}.groupHeading:first-child{margin-top:6px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}.card{overflow:hidden;border:1px solid #e0e7e1;border-radius:16px;background:#fff;transition:transform .16s,box-shadow .16s}.card:hover{transform:translateY(-2px);box-shadow:0 12px 28px #17352714}.thumbLink{display:block;position:relative;aspect-ratio:16/9;background:#edf2ed}.thumb{width:100%;height:100%;object-fit:cover;display:block}.thumbnailPlaceholder{width:100%;height:100%;display:grid;place-items:center;background:radial-gradient(ellipse at 20% 20%,#c6dfd0,#edf2ed 65%);color:#476754;font-size:12px;font-weight:750;letter-spacing:.08em}.duration{position:absolute;right:8px;bottom:8px;padding:2px 6px;border-radius:5px;background:#14241edb;color:#fff;font-size:12px}.body{padding:13px 14px 15px}.videoTitle{color:#1c3128;text-decoration:none;font-size:15px;font-weight:750;line-height:1.35}.videoTitle:hover{text-decoration:underline}.meta{margin:8px 0 0;color:#6b7771;font-size:12px}.original{padding:14px 16px;margin-bottom:12px;border-radius:13px;background:#fff;border:1px solid #e2e8e3;color:#64726b}.error{padding:20px}.error p{margin:0 0 14px}.skeletonGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}.skeleton{height:270px}@media(max-width:560px){.wrap{margin:12px 8px;padding:16px}.header{display:block}.actions{justify-content:flex-start;margin-top:14px}}`;
+const RESULTS_CSS = `:host{display:block;width:100%;min-width:0;max-width:1120px;box-sizing:border-box;overflow:hidden;position:relative}.wrap{width:100%;min-width:0;max-width:1120px;box-sizing:border-box;overflow:hidden;margin:28px auto 60px;padding:22px 24px;background:#0f0f0f;border:1px solid #303030;border-radius:22px;box-shadow:none}.wrap.compact{padding:14px 16px}.wrap.compact .body{padding:9px 11px}.wrap.compact .role{margin:18px 0 8px}.header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:22px}.title{margin:4px 0 4px;font-size:26px;line-height:1.2;letter-spacing:-.025em;color:#f1f1f1}.query{margin:0;color:#aaa}.actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.role{margin:28px 0 12px;font-size:18px;color:#f1f1f1}.card{overflow:hidden;border:1px solid #303030;border-radius:16px;background:#181818;transition:transform .16s,border-color .16s}.card:hover{transform:translateY(-2px);border-color:#555}.thumbLink{display:block;position:relative;aspect-ratio:16/9;background:#272727}.thumb{width:100%;height:100%;object-fit:cover;display:block}.thumbnailPlaceholder{width:100%;height:100%;display:grid;place-items:center;background:radial-gradient(ellipse at 20% 20%,#303030,#181818 65%);color:#aaa;font-size:12px;font-weight:750;letter-spacing:.08em}.duration{position:absolute;right:8px;bottom:8px;padding:2px 6px;border-radius:5px;background:#0f0f0fdd;color:#fff;font-size:12px}.body{padding:13px 14px 15px}.videoTitle{color:#f1f1f1;text-decoration:none;font-size:15px;font-weight:750;line-height:1.35}.videoTitle:hover{text-decoration:underline}.meta{margin:8px 0 0;color:#aaa;font-size:12px}.reason{margin:11px 0 0;color:#aaa;font-size:13px}.confidence{margin:7px 0 0;color:#aaa;font-size:11px}.badge{display:inline-block;margin-top:10px;padding:4px 8px;background:#272727;border:1px solid #303030;border-radius:999px;color:#f1f1f1;font-size:11px;font-weight:750}.original{padding:14px 16px;margin-bottom:12px;border-radius:13px;background:#181818;border:1px solid #303030;color:#aaa}.error{padding:20px}.error p{margin:0 0 14px}.skeletonGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}.skeleton{height:270px}.progressLabel{margin:0 0 12px;color:#aaa;font-size:13px;font-weight:650}@media(max-width:560px){.wrap{margin:12px 8px;padding:16px}.header{display:block}.actions{justify-content:flex-start;margin-top:14px}}`;
 
-function makeCard(video) {
+function makeCard(video, offline = false) {
   const card = element("article", { className: "card" });
   const href = `https://www.youtube.com/watch?v=${encodeURIComponent(String(video.id))}`;
   const thumbLink = element("a", { className: "thumbLink", href, attributes: { "aria-label": `Watch ${video.title}` } });
-  if (video.thumbnailUrl) {
+  if (!offline && video.thumbnailUrl) {
     const image = element("img", { className: "thumb", attributes: { src: video.thumbnailUrl, alt: "", loading: "lazy" } });
     image.addEventListener("error", () => image.remove()); thumbLink.append(image);
   } else thumbLink.append(element("div", { className: "thumbnailPlaceholder", text: "FOCUSTUBE PREVIEW" }));
@@ -21,16 +21,16 @@ function makeCard(video) {
   card.append(thumbLink, body);
   return card;
 }
-export function createResultsUI({ query, parent = null, onRetry = () => {}, onOriginalChange = () => {} }) {
+export function createResultsUI({ mode, query, parent = null, settings = {}, onRetry = () => {}, onOriginalChange = () => {} }) {
   const pair = createHost(SELECTORS.resultsHost, SELECTORS.resultsHost);
   if (!pair) return null;
   const { host, shadow } = pair;
   addStyle(shadow, componentCss() + RESULTS_CSS);
-  const wrap = element("section", { className: "wrap", attributes: { "aria-label": "FocusTube relevant videos" } });
+  const wrap = element("section", { className: `wrap ${settings.density === "compact" ? "compact" : ""}`, attributes: { "aria-label": "FocusTube curated videos" } });
   const header = element("div", { className: "header" });
   const headingBlock = element("div");
-  headingBlock.append(element("p", { className: "eyebrow", text: "LEARN MODE · LOCAL FILTERING" }));
-  headingBlock.append(element("h2", { className: "title", text: "Relevant videos" }));
+  headingBlock.append(element("p", { className: "eyebrow", text: mode === "learn" ? "A guided learning path" : "A focused set of videos" }));
+  headingBlock.append(element("h2", { className: "title", text: "Your results" }));
   headingBlock.append(element("p", { className: "query", text: query }));
   const actions = element("div", { className: "actions" });
   const retryButton = button("Retry", "button"); retryButton.addEventListener("click", onRetry);
@@ -70,34 +70,48 @@ export function createResultsUI({ query, parent = null, onRetry = () => {}, onOr
     onOriginalChange(original);
   };
   originalButton.addEventListener("click", toggleOriginal);
-  const renderSkeleton = () => {
+  const renderSkeleton = (message = "Preparing your learning path…") => {
     original = false; savedResults = []; setCuratedSearch(true); retryButton.hidden = false; originalButton.textContent = "Show original YouTube results"; status.hidden = false;
+    const label = element("p", { className: "progressLabel", text: message });
     const grid = element("div", { className: "skeletonGrid" });
     for (let i = 0; i < CONFIG.UI.skeletonCardCount; i += 1) grid.append(element("div", { className: "skeleton" }));
-    status.className = ""; status.replaceChildren(grid);
+    status.className = ""; status.replaceChildren(label, grid);
+  };
+  const setProgress = message => {
+    if (!status.isConnected || !message) return;
+    let label = status.querySelector(".progressLabel");
+    if (!label) { label = element("p", { className: "progressLabel" }); status.prepend(label); }
+    label.textContent = String(message).slice(0, 180);
   };
   const renderError = message => {
-    setCuratedSearch(false);
+    // Keep the curated panel in place. Reveal original YouTube only when the user
+    // explicitly selects the button; transient LLM failures must not flip the page.
+    setCuratedSearch(true);
     status.className = "status error"; status.replaceChildren();
     status.append(element("p", { text: message }));
     const retry = button("Try again", "button primary", onRetry);
     const dismiss = button("Dismiss", "button", () => { status.replaceChildren(); status.hidden = true; });
-    status.append(retry, dismiss, document.createTextNode(" Native YouTube results are available below."));
+    status.append(retry, dismiss);
     preserveOriginalNotice();
   };
   const renderResults = result => {
     status.className = ""; status.replaceChildren();
-    if (!result.videos?.length) { renderError("No relevant videos matched this search. Try a broader search or show original results."); return; }
-    for (const [group, label] of [["relevant", "Relevant matches"], ["related", "Related searches"]]) {
-      const videos = result.videos.filter(video => (video.group || "relevant") === group);
+    if (result.metadata?.fallbackLabel) status.append(element("div", { className: "status", text: result.metadata.fallbackLabel }));
+    if (!result.videos?.length) { renderError("No videos met the quality threshold. Try a broader search or show original results."); return; }
+    const queryKey = String(query || "").trim().toLocaleLowerCase();
+    const groups = [
+      ["Relevant videos", result.videos.filter(video => queryKey && String(video.sourceQuery || "").trim().toLocaleLowerCase() === queryKey)],
+      ["Related searches", result.videos.filter(video => !queryKey || String(video.sourceQuery || "").trim().toLocaleLowerCase() !== queryKey)]
+    ];
+    for (const [label, videos] of groups) {
       if (!videos.length) continue;
-      status.append(element("h3", { className: "groupHeading", text: label }));
+      status.append(element("h3", { className: "role", text: label }));
       const grid = element("div", { className: "grid" });
-      for (const video of videos) grid.append(makeCard(video));
+      for (const video of videos) grid.append(makeCard(video, result.metadata?.providers?.includes("mock")));
       status.append(grid);
     }
     preserveOriginalNotice();
   };
   const dispose = () => { setCuratedSearch(false); safeRemove(host); };
-  return { host, shadow, renderSkeleton, renderError, renderResults, dispose, toggleOriginal };
+  return { host, shadow, renderSkeleton, setProgress, renderError, renderResults, dispose, toggleOriginal };
 }
