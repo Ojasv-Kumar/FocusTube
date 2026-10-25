@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FocusTube UI QA</title><style>html,body{margin:0;width:100%;height:100%;background:#03060c}body{overflow:hidden}</style></head><body><script>
+window.chrome = { runtime: { getURL: (path) => new URL(path, location.href).href } };
+window.addEventListener('error', e => { document.body.dataset.jsError = e.message || 'error'; });
+window.addEventListener('unhandledrejection', e => { document.body.dataset.promiseError = String(e.reason); });
+import('/src/content/mode-picker.js').then(({openModePicker}) => {
+  const assistant = new URLSearchParams(location.search).get('view') === 'assistant';
+  const picker = openModePicker({currentMode:'learn', required:true, showIntro:!assistant, onSelect:()=>{}});
+  window.__focustubeQaPicker = picker;
+  if (assistant) setTimeout(() => {
+    const shadow = picker?.host?.shadowRoot;
+    const learn = shadow && [...shadow.querySelectorAll('button.mode')].find(b => b.textContent.includes('Learn'));
+    learn?.click();
+  }, 100);
+});
+</script></body></html>
