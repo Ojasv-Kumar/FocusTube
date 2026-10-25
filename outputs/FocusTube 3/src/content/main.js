@@ -14,9 +14,10 @@ import { startAutoplayGuard } from "./autoplay.js";
 
 let settings = { ...DEFAULT_SETTINGS };
 let activeMode = "relax";
-let interestText = "";
 let picker = null;
 let switcher = null;
+let modeLockNotice = null;
+let modeLockNoticeTimer = 0;
 let resultsUI = null;
 let homeUI = null;
 let learnSearchUI = null;
@@ -33,7 +34,6 @@ let navigationCleanup = null;
 let disposed = false;
 let lastUrl = location.href;
 let currentPageType = "other";
-const MODE_NAMES = { learn: "Learn", interest: "Interest", curiosity: "Curiosity", relax: "Relax" };
 
 function hideCurrentPanels() {
   resultsUI?.dispose(); resultsUI = null;
@@ -45,20 +45,40 @@ function hideCurrentPanels() {
 function safeSessionGet(key) { try { return sessionStorage.getItem(key); } catch { return null; } }
 function safeSessionSet(key, value) { try { sessionStorage.setItem(key, value); } catch { /* Picker state is an optimization. */ } }
 function updateSwitcher() { switcher?.update(activeMode); }
+function showModeLockNotice(remainingMs) {
+  const expiresAt = Date.now() + Math.max(0, Number(remainingMs) || 0);
+  if (modeLockNoticeTimer) clearInterval(modeLockNoticeTimer);
+  modeLockNotice?.remove();
+  const notice = document.createElement("div");
+  modeLockNotice = notice;
+  notice.setAttribute("role", "alert");
+  Object.assign(notice.style, { position: "fixed", top: "18px", left: "50%", transform: "translateX(-50%)", zIndex: "2147483647", padding: "12px 18px", border: "1px solid #ff5b5b", borderRadius: "12px", background: "#2a1111", color: "#ff6b6b", font: "700 14px/1.4 system-ui,sans-serif", boxShadow: "0 8px 32px #0009", fontVariantNumeric: "tabular-nums" });
+  const tick = () => {
+    const seconds = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+    const time = `${String(Math.floor(seconds / 3600)).padStart(2, "0")}:${String(Math.floor(seconds % 3600 / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+    notice.textContent = seconds ? `${time} left to close Learn mode` : "Learn mode timer complete. You can switch modes now.";
+    if (!seconds) { clearInterval(modeLockNoticeTimer); modeLockNoticeTimer = 0; setTimeout(() => { if (modeLockNotice === notice) { notice.remove(); modeLockNotice = null; } }, 2500); }
+  };
+  tick(); modeLockNoticeTimer = setInterval(tick, 1000); (document.body || document.documentElement).append(notice);
+}
 function syncSwitcher() {
   if (!CONFIG.Behaviour.showFloatingSwitcher || activeMode === "relax") { switcher?.dispose(); switcher = null; return; }
   if (!switcher) switcher = createModeSwitcher(openPicker);
   updateSwitcher();
 }
-function persistMode(mode, interest = interestText) {
+async function persistMode(mode, { deferApply = false } = {}) {
+  const response = await sendMessage(MESSAGE.SET_MODE, { mode }, makeCorrelationId());
+  if (!response?.ok) {
+    if (response?.errorCode === "LEARN_MODE_LOCKED" && !picker?.host?.isConnected) showModeLockNotice(response.remainingMs);
+    return response;
+  }
   activeMode = mode;
   if (mode !== "relax") watchNavigation();
   else { navigationCleanup?.(); navigationCleanup = null; }
-  interestText = interest;
-  settings = { ...settings, activeMode: mode, interestText: interest };
+  settings = { ...settings, activeMode: mode };
   syncSwitcher();
-  applyPageBehavior("mode-change");
-  void sendMessage(MESSAGE.SET_MODE, { mode, interestText: interest }, makeCorrelationId());
+  if (!deferApply) void applyPageBehavior("mode-change");
+  return response;
 }
 function openPicker() {
   if (picker?.host?.isConnected) return;
@@ -67,13 +87,16 @@ function openPicker() {
   enterPickerState();
   picker = openModePicker({
     currentMode: activeMode,
-    interestText: interestText || settings.defaultInterestTopic || "",
     required: Boolean(document.documentElement?.hasAttribute("data-focustube-gate")),
-    onSelect: (mode, interest) => {
+    onSelect: async mode => {
+      const response = await persistMode(mode, { deferApply: true });
+      if (!response?.ok) return response;
+      picker?.close();
       picker = null;
       safeSessionSet("focustube.pickerSeen", "1");
       window.__FOCUSTUBE_GATE__?.release();
-      persistMode(mode, interest);
+      void applyPageBehavior("mode-change");
+      return response;
     },
     onClose: () => { picker = null; if (settings.activeMode) void applyPageBehavior("picker-closed"); }
   });
@@ -98,27 +121,6 @@ function queryAllOpenShadowRoots(selector) {
   };
   visit(document);
   return [...found];
-}
-function findMastheadSearchRegion() {
-  const direct = queryFirst(SELECTORS.mastheadSearchRegion);
-  if (direct) return direct;
-  for (const masthead of queryAllOpenShadowRoots("ytd-masthead")) {
-    try { const region = masthead.shadowRoot?.querySelector("#center, #search"); if (region) return region; } catch { /* YouTube's internal DOM may change. */ }
-  }
-  return null;
-}
-function waitForMastheadSearchRegion() {
-  const immediate = findMastheadSearchRegion();
-  if (immediate) return Promise.resolve(immediate);
-  return new Promise(resolve => {
-    const started = Date.now();
-    const retry = () => {
-      const found = findMastheadSearchRegion();
-      if (found || Date.now() - started >= CONFIG.Behaviour.maxWaitMs) { resolve(found); return; }
-      setTimeout(retry, CONFIG.Behaviour.selectorRetryMs);
-    };
-    retry();
-  });
 }
 function scheduleModeDomCleanup() {
   if (activeMode === "relax" || shortsCleanupTimer) return;
@@ -165,11 +167,36 @@ function setNativeSearchHidden(hidden) {
   // Each query is also searched independently in every open shadow root, because
   // selectors such as `ytd-masthead ytd-searchbox` cannot cross a shadow boundary.
   const selectors = [
+    ...SELECTORS.mastheadSearchRegion, ...SELECTORS.mastheadMenuButton,
     "ytd-masthead ytd-searchbox", "ytd-masthead #search-form", "ytd-masthead #voice-search-button",
     "ytd-masthead #search-icon-legacy", "ytd-searchbox", "#search-form", "#voice-search-button",
     "#search-icon-legacy", "tp-yt-paper-icon-button#search-icon-legacy"
   ];
   for (const node of queryAllOpenShadowRoots(selectors.join(","))) setInlineHidden(node, "native-search", hidden);
+  for (const masthead of queryAllOpenShadowRoots("ytd-masthead")) {
+    try {
+      for (const node of masthead.shadowRoot?.querySelectorAll("#center,#search,#start #button,#menu-button") || []) {
+        setInlineHidden(node, "native-search", hidden);
+      }
+    } catch { /* YouTube may change or close its masthead shadow root. */ }
+  }
+}
+function setLearnLogoFocusRingSuppressed(suppress) {
+  for (const masthead of queryAllOpenShadowRoots("ytd-masthead")) {
+    const root = masthead.shadowRoot;
+    if (!root) continue;
+    let style = root.querySelector("style[data-focustube-logo-focus]");
+    if (suppress && !style) {
+      style = document.createElement("style");
+      style.dataset.focustubeLogoFocus = "true";
+      style.textContent = "#logo:focus,#logo:focus-visible,#logo-container:focus,#logo-container:focus-visible,ytd-topbar-logo-renderer:focus-visible{outline:none!important;box-shadow:none!important}";
+      root.append(style);
+    } else if (!suppress) style?.remove();
+    if (suppress) {
+      const focused = root.activeElement;
+      if (focused?.matches?.("#logo,#logo-container,ytd-topbar-logo-renderer")) focused.blur();
+    }
+  }
 }
 function setNativeSearchResultsHidden(hidden) {
   const shouldHide = hidden && activeMode === "learn" && currentPageType === "search" && document.documentElement?.dataset.focustubeSearch === "true";
@@ -217,8 +244,8 @@ function setShortsVisibility(hidden) {
 function reattachLearnPanels() {
   if (activeMode !== "learn" || currentPageType !== "search") return;
   if (learnSearchUI?.host && !learnSearchUI.host.isConnected) {
-    const masthead = findMastheadSearchRegion();
-    if (masthead) masthead.append(learnSearchUI.host);
+    const searchAnchor = queryAllOpenShadowRoots("ytd-search #primary")[0] || queryFirst(["ytd-search", "ytd-app #content"], document);
+    if (searchAnchor) searchAnchor.prepend(learnSearchUI.host);
   }
   if (resultsUI?.host && !resultsUI.host.isConnected && document.documentElement?.dataset.focustubeSearch === "true") {
     const mounts = queryAllOpenShadowRoots("ytd-search #primary");
@@ -228,9 +255,12 @@ function reattachLearnPanels() {
 }
 function runModeDomCleanup() {
   reattachLearnPanels();
+  const nativeSearchMode = activeMode === "curiosity" && currentPageType === "search";
+  if (nativeSearchMode) applyMode("relax", settings);
   setNativeSearchHidden(activeMode === "learn");
+  setLearnLogoFocusRingSuppressed(activeMode === "learn" && currentPageType === "search");
   setNativeSearchResultsHidden(activeMode === "learn");
-  const hideShorts = Boolean(CONFIG.Modes[activeMode]?.hideShorts && (activeMode !== "learn" || settings.hideShortsInLearn !== false));
+  const hideShorts = !nativeSearchMode && Boolean(CONFIG.Modes[activeMode]?.hideShorts && (activeMode !== "learn" || settings.hideShortsInLearn !== false));
   setShortsVisibility(hideShorts);
 }
 
@@ -243,6 +273,13 @@ function installHealthCheck() {
         return false;
       }
       if (message?.type === "PIPELINE_PROGRESS" && message?.namespace === "focustube-progress" && message.correlationId === activePipelineCorrelationId) {
+        const update = message.payload || {};
+        if (update.stage === "provisional-results" && Array.isArray(update.videos)) {
+          const provisional = { videos: update.videos, channels: [], metadata: update.metadata || { provisional: true } };
+          homeUI?.renderResults?.(provisional, { provisional: true });
+          resultsUI?.renderResults?.(provisional, { provisional: true });
+          return false;
+        }
         const progress = message.payload?.message || "Working on your feed…";
         homeUI?.setProgress?.(progress);
         resultsUI?.setProgress?.(progress);
@@ -279,7 +316,7 @@ function waitForElement(selectors) {
 }
 function makePipelineRequest(mode, query, action, token, correlationId, extra = {}) {
   activePipelineCorrelationId = correlationId;
-  const payload = { mode, query, interest: interestText, action, ...extra };
+  const payload = { mode, query, action, ...extra };
   return sendMessage(MESSAGE.RUN_PIPELINE, payload, correlationId).then(result => {
     if (disposed || token !== requestToken || mode !== activeMode) return null;
     return result;
@@ -303,17 +340,16 @@ async function loadHome(action, token, onUpdate, page = 0, excludeIds = []) {
 }
 function scheduleHomePrefetch(page, excludeIds) {
   const mode = activeMode;
-  if (!homeUI || currentPageType !== "home" || !["interest", "curiosity"].includes(mode)) return;
+  if (!homeUI || currentPageType !== "home" || mode !== "curiosity") return;
   if (excludeIds.length >= CONFIG.Pipeline.maxVideosShown || page * CONFIG.Pipeline.feedBatchSize >= CONFIG.Pipeline.maxVideosShown) return;
   const ids = [...new Set(excludeIds.map(id => String(id)))];
-  const signature = JSON.stringify({ mode, interest: interestText, page, ids: [...ids].sort() });
+  const signature = JSON.stringify({ mode, page, ids: [...ids].sort() });
   if (signature === lastPrefetchSignature) return;
   lastPrefetchSignature = signature;
-  const interest = interestText;
   setTimeout(() => {
-    if (!homeUI || currentPageType !== "home" || activeMode !== mode || interestText !== interest) return;
+    if (!homeUI || currentPageType !== "home" || activeMode !== mode) return;
     const correlationId = makeCorrelationId();
-    const payload = { mode, query: "", interest, action: "home", page, excludeIds: ids };
+    const payload = { mode, query: "", action: "home", page, excludeIds: ids };
     // Intentionally do not attach this speculative request to the visible progress
     // indicator. The result is cached by the service worker and reused on click.
     void sendMessage(MESSAGE.RUN_PIPELINE, payload, correlationId)
@@ -337,13 +373,15 @@ async function applyPageBehavior(reason = "navigation") {
   applyMode(activeMode, settings);
   runModeDomCleanup();
   if (activeMode === "relax") return;
+  // Curiosity curates its home feed, but search remains native YouTube just like Relax.
+  if (activeMode === "curiosity" && currentPageType === "search") return;
   if (activeMode === "learn") {
-    const masthead = await waitForMastheadSearchRegion();
+    const searchAnchor = await waitForElement(["ytd-search #primary", "ytd-search", "ytd-app #content"]);
     if (token !== requestToken) return;
-    if (masthead && currentPageType === "search") {
+    if (searchAnchor && currentPageType === "search") {
       runModeDomCleanup();
       const query = new URL(location.href).searchParams.get("search_query") || "";
-      learnSearchUI = createLearnSearch({ query, anchor: masthead, onSubmit: value => { const safeQuery = normalizeQuery(value, CONFIG.Pipeline.queryMaxChars); if (!safeQuery) return; try { location.href = `/results?search_query=${encodeURIComponent(safeQuery)}`; } catch { logger.warn("content", "could not submit learning query"); } } });
+      learnSearchUI = createLearnSearch({ query, anchor: searchAnchor, onSubmit: value => { const safeQuery = normalizeQuery(value, CONFIG.Pipeline.queryMaxChars); if (!safeQuery) return; try { location.href = `/results?search_query=${encodeURIComponent(safeQuery)}`; } catch { logger.warn("content", "could not submit learning query"); } } });
     }
   }
   if (currentPageType === "shorts" && CONFIG.Modes[activeMode].redirectShortsToWatch) {
@@ -360,23 +398,31 @@ async function applyPageBehavior(reason = "navigation") {
       if (token !== requestToken || !anchor) return;
       homeUI = createHomeUI({
         mode: activeMode,
-        interest: interestText,
+        learnModeLockUntil: settings.learnModeLockUntil,
+        onSetLearnTimer: async durationSeconds => {
+          const response = await sendMessage(MESSAGE.SET_LEARN_TIMER, { durationSeconds }, makeCorrelationId());
+          if (response?.ok) settings.learnModeLockUntil = response.learnModeLockUntil || response.settings?.learnModeLockUntil || 0;
+          return response;
+        },
         onSearch: value => {
           const safeQuery = normalizeQuery(value, CONFIG.Pipeline.queryMaxChars);
           if (!safeQuery) return;
           try { location.href = `/results?search_query=${encodeURIComponent(safeQuery)}`; }
           catch { logger.warn("content", "could not submit the learning prompt"); }
         },
-        onUseOriginal: () => persistMode("relax", interestText),
+        onUseOriginal: () => persistMode("relax"),
         onRefresh: () => {
-          homePage = 0;
+          // Curiosity query plans rotate by page. Advancing here also gives the
+          // refresh a distinct cache key instead of returning the same page-0 feed.
+          homePage += 1;
+          const refreshPage = homePage;
           const nextToken = ++requestToken;
           loadHome("home", nextToken, (state, result) => {
             if (!homeUI) return;
             if (state === "loading") homeUI.renderSkeleton();
-            else if (state === "results") { homeUI.renderResults(result); scheduleHomePrefetch(1, homeUI.getVideoIds()); }
+            else if (state === "results") { homeUI.renderResults(result); scheduleHomePrefetch(refreshPage + 1, homeUI.getVideoIds()); }
             else homeUI.renderError(result);
-          }, 0, []).catch(error => showPageFailure(error, makeCorrelationId()));
+          }, refreshPage, []).catch(error => showPageFailure(error, makeCorrelationId()));
         },
         onLoadMore: () => {
           if (!homeUI || homeUI.isLoadingMore()) return;
@@ -475,7 +521,6 @@ async function boot() {
     settings = await readSettings();
     applyTheme(settings.theme);
     setDebug(settings.debugLogging);
-    interestText = settings.interestText || "";
     activeMode = settings.activeMode || "relax";
     syncSwitcher();
     installHealthCheck();
@@ -487,11 +532,11 @@ async function boot() {
       chrome.storage.onChanged.addListener((changes, area) => {
         if (area !== "local") return;
         if (changes.activeMode) activeMode = changes.activeMode.newValue || "relax";
-        if (changes.interestText) interestText = changes.interestText.newValue || "";
-        for (const key of ["askForModeEveryTab", "keepCommentsVisible", "hideShortsInLearn", "disableAutoplayInLearn", "resultsPerSearch", "showReasons", "defaultInterestTopic", "curiosityStrictness", "density", "mockMode", "debugLogging", "hideCommentsInLearn", "hideSubscriptionsInLearn", "theme", "cameraEnabled", "cameraCalibration"]) if (changes[key]) settings[key] = changes[key].newValue;
+        for (const key of ["askForModeEveryTab", "keepCommentsVisible", "hideShortsInLearn", "disableAutoplayInLearn", "resultsPerSearch", "showReasons", "curiosityStrictness", "density", "mockMode", "debugLogging", "hideCommentsInLearn", "hideSubscriptionsInLearn", "theme", "cameraEnabled", "cameraCalibration", "learnModeLockUntil"]) if (changes[key]) settings[key] = changes[key].newValue;
+        if (changes.learnModeLockUntil) homeUI?.updateLearnTimer(changes.learnModeLockUntil.newValue);
         if (changes.theme) applyTheme(settings.theme);
         if (changes.debugLogging) setDebug(settings.debugLogging);
-        if (changes.activeMode || changes.interestText || changes.keepCommentsVisible || changes.hideShortsInLearn || changes.disableAutoplayInLearn || changes.resultsPerSearch || changes.showReasons || changes.density || changes.mockMode || changes.hideCommentsInLearn || changes.hideSubscriptionsInLearn || changes.theme) {
+        if (changes.activeMode || changes.keepCommentsVisible || changes.hideShortsInLearn || changes.disableAutoplayInLearn || changes.resultsPerSearch || changes.showReasons || changes.density || changes.mockMode || changes.hideCommentsInLearn || changes.hideSubscriptionsInLearn || changes.theme) {
           syncSwitcher();
           if (activeMode !== "relax" && !observer) watchNavigation();
           if (activeMode === "relax") navigationCleanup?.();

@@ -12,23 +12,29 @@ export class Cache {
     } catch { return null; }
   }
   async set(key, value, ttlMs) {
+    return this.setMany([[key, value]], ttlMs);
+  }
+  async setMany(rowsInput, ttlMs) {
     if (!this.storage) return false;
-    const name = PREFIX + key;
-    const row = { value, createdAt: this.now(), expiresAt: this.now() + ttlMs };
+    const rows = Object.fromEntries((rowsInput || []).filter(([key]) => typeof key === "string").map(([key, value]) => [PREFIX + key, { value, createdAt: this.now(), expiresAt: this.now() + ttlMs }]));
+    const names = Object.keys(rows);
+    if (!names.length) return true;
     try {
-      await this.storage.set({ [name]: row });
+      await this.storage.set(rows);
       const all = await this.storage.get(null);
-      const entries = Object.entries(all || {}).filter(([candidate, data]) => candidate.startsWith(PREFIX) && data?.createdAt);
-      entries.sort((a, b) => a[1].createdAt - b[1].createdAt);
-      const remove = entries.slice(0, Math.max(0, entries.length - this.maxEntries)).map(([candidate]) => candidate);
+      const cacheEntries = Object.entries(all || {}).filter(([candidate, data]) => candidate.startsWith(PREFIX) && data?.createdAt);
+      cacheEntries.sort((a, b) => a[1].createdAt - b[1].createdAt);
+      const remove = cacheEntries.slice(0, Math.max(0, cacheEntries.length - this.maxEntries)).map(([candidate]) => candidate);
       if (remove.length) await this.storage.remove(remove);
       return true;
     } catch {
       try {
         const all = await this.storage.get(null);
-        const oldest = Object.entries(all || {}).filter(([candidate, data]) => candidate.startsWith(PREFIX) && data?.createdAt).sort((a,b)=>a[1].createdAt-b[1].createdAt)[0]?.[0];
-        if (oldest) await this.storage.remove(oldest);
-        await this.storage.set({ [name]: row });
+        const existing = Object.entries(all || {}).filter(([candidate, data]) => candidate.startsWith(PREFIX) && data?.createdAt).sort((a,b)=>a[1].createdAt-b[1].createdAt);
+        const excess = Math.max(1, existing.length + names.filter(name => !all?.[name]).length - this.maxEntries);
+        const remove = existing.slice(0, excess).map(([candidate]) => candidate);
+        if (remove.length) await this.storage.remove(remove);
+        await this.storage.set(rows);
         return true;
       } catch { return false; }
     }

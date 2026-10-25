@@ -29,6 +29,7 @@ export const SELECTORS = Object.freeze({
   notificationBell: ["ytd-notification-topbar-button-renderer", "#notification-button"],
   nativeSearchBox: ["ytd-masthead #center ytd-searchbox", "ytd-masthead ytd-searchbox", "ytd-masthead #search-form", "ytd-masthead #voice-search-button", "ytd-masthead #search-icon-legacy", "ytd-searchbox"],
   mastheadSearchRegion: ["ytd-masthead #center", "ytd-masthead #search"],
+  mastheadMenuButton: ["ytd-masthead #start #button", "ytd-masthead #menu-button"],
   modePickerHost: "focustube-picker-host",
   resultsHost: "focustube-results-host",
   homeHost: "focustube-home-host",
@@ -80,7 +81,7 @@ export function makeHideCss(modes) {
     const selectors = selectorNames.flatMap(name => SELECTORS[name] || []).filter(Boolean);
     if (selectors.length) rules.push(`html[data-focustube-mode="${mode}"]${condition} ${selectors.join(`,html[data-focustube-mode="${mode}"]${condition} `)}{display:none!important}`);
   };
-  for (const mode of ["learn", "interest", "curiosity"]) {
+  for (const mode of ["learn", "curiosity"]) {
     const settings = modes[mode];
     if (settings.hideShorts && mode !== "learn") add(mode, ["shortsShelves", "shortsTab"]);
     if (settings.hideTrending) add(mode, ["trending"]);
@@ -94,7 +95,8 @@ export function makeHideCss(modes) {
   const scoped = (rootSelector, selectors) => selectors.map(selector => `${rootSelector} ${selector}`).join(",");
   rules.push(`${scoped('html[data-focustube-mode="learn"][data-focustube-hide-subscriptions="true"]', SELECTORS.subscriptions)}{display:none!important}`);
   rules.push(`${scoped('html[data-focustube-mode="learn"][data-focustube-hide-comments="true"]', SELECTORS.comments)}{display:none!important}`);
-  rules.push(`html[data-focustube-mode="learn"] ${SELECTORS.nativeSearchBox.join(",html[data-focustube-mode=\"learn\"] ")}{display:none!important}`);
+  const learnMastheadHidden = [...SELECTORS.nativeSearchBox, ...SELECTORS.mastheadSearchRegion, ...SELECTORS.mastheadMenuButton];
+  rules.push(`html[data-focustube-mode="learn"] ${learnMastheadHidden.join(",html[data-focustube-mode=\"learn\"] ")}{display:none!important}`);
   rules.push(`${scoped('html[data-focustube-hide-comments="true"]', SELECTORS.comments)}{display:none!important}`);
   rules.push(`${scoped('html[data-focustube-search="true"]', SELECTORS.searchResultItems)}{display:none!important}`);
   rules.push("html[data-focustube-mode='startup'] body,html[data-focustube-mode='picker'] body{overflow:hidden!important}");

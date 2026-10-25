@@ -61,24 +61,6 @@ export function validateLearnJudge(value, pool) {
   }
   return { videos };
 }
-export function validateInterestJudge(value, pool) {
-  const allowed = new Map(pool.map(video => [video.id, video]));
-  const roles = new Set(["core", "tutorial", "project", "news", "talk", "other"]);
-  const rows = Array.isArray(value?.videos) ? value.videos : Array.isArray(value?.v) ? value.v : [];
-  const videos = [];
-  const used = new Set();
-  for (const row of rows) {
-    const id = rowId(row, allowed, pool);
-    const relevance = normalizedScore(row?.relevance ?? row?.fit);
-    const quality = normalizedScore(row?.quality ?? row?.q);
-    if (!id || used.has(id) || relevance === null || quality === null) continue;
-    used.add(id);
-    videos.push({ ...allowed.get(id), relevance, quality,
-      role: roles.has(row.role) ? row.role : "other",
-      reason: limitedString(row.reason ?? row.w, CONFIG.Pipeline.reasonMaxChars, relevance >= 0.8 ? "Strong metadata match for this interest." : relevance >= 0.6 ? "Relevant to this interest based on metadata." : "Lower relevance based on the available metadata.") });
-  }
-  return { videos };
-}
 export function validateCuriosityJudge(value, pool) {
   const allowed = new Map(pool.map(video => [video.id, video]));
   const rows = Array.isArray(value?.videos) ? value.videos : Array.isArray(value?.v) ? value.v : [];

@@ -55,7 +55,7 @@ async function refreshCameraMonitor() {
   const activeTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   const tabId = activeTabs[0]?.id;
   const state = tabId == null ? null : playbackByTab.get(tabId);
-  const isOn = Boolean(settings.cameraEnabled && settings.cameraCalibration && state?.visible && ["learn", "interest", "curiosity", "relax"].includes(state?.mode) && state?.isWatch && (state.isPlaying || state.gesturePaused));
+  const isOn = Boolean(settings.cameraEnabled && settings.cameraCalibration && state?.visible && ["learn", "curiosity", "relax"].includes(state?.mode) && state?.isWatch && (state.isPlaying || state.gesturePaused));
   const desired = isOn ? { tabId, calibration: settings.cameraCalibration, gestureOnly: state.mode !== "learn" || (!state.isPlaying && state.gesturePaused) } : null;
   const signature = desired ? JSON.stringify(desired) : "";
   if (signature === monitorSignature) return;
@@ -79,7 +79,6 @@ async function refreshCameraMonitor() {
   }
 }
 function queueCameraRefresh() { monitorQueue = monitorQueue.then(refreshCameraMonitor).catch(() => {}); }
-
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.namespace !== CAMERA_NAMESPACE) return false;
   if (message.type === "PLAYBACK_STATE") {
@@ -106,7 +105,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "ATTENTION_CLEAR" && tabId != null) { notifyTab(tabId, "ATTENTION_CLEAR"); sendResponse({ ok: true }); return false; }
   if (message.type === "OPEN_PALM" && tabId != null) {
     const state = playbackByTab.get(tabId);
-    if (state?.visible && state?.isWatch && ["learn", "interest", "curiosity", "relax"].includes(state?.mode) && (state.isPlaying || state.gesturePaused)) notifyTab(tabId, "ATTENTION_GESTURE");
+    if (state?.visible && state?.isWatch && ["learn", "curiosity", "relax"].includes(state?.mode) && (state.isPlaying || state.gesturePaused)) notifyTab(tabId, "ATTENTION_GESTURE");
+    sendResponse({ ok: true }); return false;
+  }
+  if (message.type === "PLAYBACK_SEEK" && tabId != null) {
+    const state = playbackByTab.get(tabId), delta = payload.delta;
+    if (state?.visible && state?.isWatch && state?.isPlaying && ["learn", "curiosity", "relax"].includes(state?.mode) && (delta === 10 || delta === -10)) notifyTab(tabId, "ATTENTION_SEEK", { delta });
+    sendResponse({ ok: true }); return false;
+  }
+  if (message.type === "PLAYBACK_SPEED" && tabId != null && typeof payload.active === "boolean") {
+    const state = playbackByTab.get(tabId);
+    if (state?.visible && state?.isWatch && ["learn", "curiosity", "relax"].includes(state?.mode) && (!payload.active || state.isPlaying)) notifyTab(tabId, "ATTENTION_PLAYBACK_SPEED", { active: payload.active });
     sendResponse({ ok: true }); return false;
   }
   if (message.type === "CAMERA_ERROR" && tabId != null) {
@@ -137,10 +146,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case MESSAGE.SET_MODE: {
         const mode = message.payload?.mode;
-        if (!["learn", "interest", "curiosity", "relax"].includes(mode)) return { ok: false, errorCode: "INVALID_MODE", userMessage: "Choose one of the four FocusTube modes." };
-        const interestText = String(message.payload?.interestText ?? settings.interestText).slice(0, CONFIG.ModesPicker.interestMaxChars).trim();
-        const updated = await saveSettings({ activeMode: mode, interestText });
+        if (!["learn", "curiosity", "relax"].includes(mode)) return { ok: false, errorCode: "INVALID_MODE", userMessage: "Choose Learn, Curiosity, or Relax." };
+        const remainingMs = Math.max(0, Number(settings.learnModeLockUntil || 0) - Date.now());
+        if (mode !== "learn" && settings.activeMode === "learn" && remainingMs > 0) return { ok: false, errorCode: "LEARN_MODE_LOCKED", remainingMs, userMessage: "Learn mode is locked until its timer ends." };
+        const updated = await saveSettings({ activeMode: mode });
         return { ok: true, settings: publicSettings(updated) };
+      }
+      case MESSAGE.SET_LEARN_TIMER: {
+        if (sender?.tab?.id == null || !sender.url?.startsWith("https://www.youtube.com/") && !sender.url?.startsWith("https://youtube.com/")) return { ok: false, errorCode: "FORBIDDEN", userMessage: "Set the Learn timer from YouTube in Learn mode." };
+        const durationSeconds = Number(message.payload?.durationSeconds);
+        if (!Number.isInteger(durationSeconds) || durationSeconds < 1 || durationSeconds > 86_400) return { ok: false, errorCode: "INVALID_TIMER", userMessage: "Choose a timer between 00:00:01 and 24:00:00." };
+        if (settings.activeMode !== "learn") return { ok: false, errorCode: "LEARN_MODE_REQUIRED", userMessage: "Switch to Learn mode before setting its timer." };
+        const learnModeLockUntil = Date.now() + durationSeconds * 1000;
+        const updated = await saveSettings({ learnModeLockUntil });
+        return { ok: true, settings: publicSettings(updated), learnModeLockUntil };
       }
       case MESSAGE.RUN_PIPELINE:
         {

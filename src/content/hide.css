@@ -38,3 +38,5 @@ html[data-focustube-mode="learn"] ytd-masthead ytd-searchbox,
 html[data-focustube-mode="learn"] ytd-masthead #search-form,
 html[data-focustube-mode="learn"] ytd-masthead #voice-search-button,
 html[data-focustube-mode="learn"] ytd-masthead #search-icon-legacy { display:none!important; }
+html[data-focustube-mode="learn"] ytd-masthead #menu-button,
+html[data-focustube-mode="learn"] ytd-masthead #start #button { display:none!important; }

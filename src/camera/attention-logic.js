@@ -14,15 +14,18 @@ export function isAway(direction, calibration, yawLimit = 0.24, pitchLimit = 0.2
 }
 
 export function isOpenPalm(result, aspectRatio = 4 / 3) {
-  const category = result?.gestures?.[0]?.[0];
-  if (category?.categoryName === "Open_Palm" && category.score >= 0.25) return true;
+  return classifyHandGesture(result, aspectRatio) === "open-palm";
+}
 
-  // MediaPipe's gesture label can be low-confidence when the hand is angled
-  // or lighting is poor. Fall back to finger extension from the hand landmarks.
+export function classifyHandGesture(result, aspectRatio = 4 / 3) {
+  const category = result?.gestures?.[0]?.[0];
+  const categoryLabels = { Open_Palm: "open-palm", Thumb_Up: "seek-forward", Thumb_Down: "seek-backward", Closed_Fist: "fast-play" };
+  if (categoryLabels[category?.categoryName] && category.score >= 0.3) return categoryLabels[category.categoryName];
+
+  // Geometry fallback makes the static poses work when the gesture label is
+  // uncertain because of hand angle or lighting.
   const landmarks = result?.landmarks?.[0];
-  if (!Array.isArray(landmarks) || landmarks.length < 21) return false;
-  const wrist = landmarks[0];
-  if (![wrist?.x, wrist?.y].every(Number.isFinite)) return false;
+  if (!Array.isArray(landmarks) || landmarks.length < 21) return null;
   const point = index => {
     const value = landmarks[index];
     return Number.isFinite(value?.x) && Number.isFinite(value?.y) ? { x: value.x * aspectRatio, y: value.y } : null;
@@ -34,10 +37,21 @@ export function isOpenPalm(result, aspectRatio = 4 / 3) {
     if (denom < 1e-6) return 0;
     return Math.acos(Math.max(-1, Math.min(1, (va.x * vc.x + va.y * vc.y) / denom))) * 180 / Math.PI;
   };
-  const wristPoint = point(0), fingers = [[5, 6, 8], [9, 10, 12], [13, 14, 16], [17, 18, 20]];
-  const extended = fingers.filter(([mcpIndex, pipIndex, tipIndex]) => {
+  const wrist = point(0);
+  if (!wrist) return null;
+  const fingers = [[5, 6, 8], [9, 10, 12], [13, 14, 16], [17, 18, 20]];
+  const extended = fingers.map(([mcpIndex, pipIndex, tipIndex]) => {
     const mcp = point(mcpIndex), pip = point(pipIndex), tip = point(tipIndex);
-    return mcp && pip && tip && angle(mcp, pip, tip) >= 132 && distance(wristPoint, tip) > distance(wristPoint, pip) * 1.015;
-  }).length;
-  return extended >= 3;
+    return Boolean(mcp && pip && tip && angle(mcp, pip, tip) >= 132 && distance(wrist, tip) > distance(wrist, pip) * 1.015);
+  });
+  if (extended.filter(Boolean).length >= 3) return "open-palm";
+  if (extended.filter(Boolean).length <= 1) {
+    const thumbBase = point(2), thumbTip = point(4);
+    if (thumbBase && thumbTip) {
+      const dx = thumbTip.x - thumbBase.x, dy = thumbTip.y - thumbBase.y;
+      if (Math.abs(dy) >= 0.045 && Math.abs(dy) >= Math.abs(dx) * 1.15) return dy < 0 ? "seek-forward" : "seek-backward";
+    }
+    if (extended.filter(Boolean).length === 0) return "fast-play";
+  }
+  return null;
 }

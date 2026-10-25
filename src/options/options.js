@@ -3,7 +3,21 @@ import { MESSAGE, makeRequest } from "../messages.js";
 
 const $ = id => document.getElementById(id);
 const status = $("status");
-const tell = (text, error = false) => { status.textContent = text; status.dataset.error = String(error); };
+let toastTimer;
+let toastNode;
+const tell = (text, error = false, toast = false) => {
+  status.textContent = text; status.dataset.error = String(error);
+  clearTimeout(toastTimer);
+  toastNode?.remove(); toastNode = null;
+  if (toast) {
+    toastNode = document.createElement("div");
+    toastNode.className = "ft-toast";
+    toastNode.setAttribute("role", "status");
+    toastNode.textContent = text;
+    document.body.append(toastNode);
+    toastTimer = setTimeout(() => { toastNode?.remove(); toastNode = null; }, 2500);
+  }
+};
 const send = (type, payload = {}) => new Promise(resolve => {
   let settled = false;
   const finish = value => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
@@ -14,7 +28,6 @@ const send = (type, payload = {}) => new Promise(resolve => {
 function paint(s) {
   document.documentElement.dataset.theme = s.theme === "light" ? "light" : "dark";
   $("ask-every-tab").checked = s.askForModeEveryTab;
-  $("interest").value = s.defaultInterestTopic || "";
   $("results-count").value = String(s.resultsPerSearch);
   $("strictness").value = s.curiosityStrictness;
   $("mock").checked = s.mockMode;
@@ -32,7 +45,6 @@ function paint(s) {
 function read() {
   return {
     askForModeEveryTab: $("ask-every-tab").checked,
-    defaultInterestTopic: $("interest").value.trim(),
     resultsPerSearch: Number($("results-count").value),
     curiosityStrictness: $("strictness").value,
     mockMode: $("mock").checked,
@@ -69,7 +81,7 @@ $("settings-form").addEventListener("submit", async event => {
     tell("Open camera setup and complete the 3-second calibration before enabling camera monitoring.", true);
     return;
   }
-  try { const settings = await saveSettings(values); paint(settings); tell("Preferences saved."); }
+  try { const settings = await saveSettings(values); paint(settings); tell("Preferences saved.", false, true); }
   catch { tell("Could not save preferences.", true); }
 });
 $("camera-setup").addEventListener("click", async () => {

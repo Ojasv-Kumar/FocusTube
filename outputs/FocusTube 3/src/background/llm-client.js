@@ -192,7 +192,7 @@ export class LlmClient {
       });
     } catch (cause) {
       if (cause?.code === "PARSE_ERROR" || cause?.name === "ParseError") {
-        const error = new LlmError("Ollama responded, but FocusTube could not parse its JSON output. Interest and Curiosity need valid JSON for query expansion and video ranking.", { cause });
+        const error = new LlmError("Ollama responded, but FocusTube could not parse its JSON output. Curiosity ranking needs valid JSON from the local model.", { cause });
         error.code = "OLLAMA_JSON_OUTPUT_FAILED";
         throw error;
       }

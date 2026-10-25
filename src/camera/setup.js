@@ -6,7 +6,14 @@ const $ = id => document.getElementById(id);
 const video = $("preview"), startButton = $("start"), calibrateButton = $("calibrate"), stopButton = $("stop"), progress = $("progress"), status = $("status"), note = $("preview-note");
 let stream = null, landmarker = null, cancelled = false, calibrating = false;
 const asset = path => chrome.runtime.getURL(path);
-function tell(text, error = false) { status.textContent = text; status.dataset.error = String(error); }
+let toastTimer;
+function tell(text, error = false) {
+  status.textContent = text; status.dataset.error = String(error);
+  const success = text.startsWith("Setup complete.");
+  status.dataset.toast = String(success);
+  clearTimeout(toastTimer);
+  if (success) toastTimer = setTimeout(() => { status.dataset.toast = "false"; }, 2500);
+}
 
 async function loadLandmarker() {
   const vision = await FilesetResolver.forVisionTasks(asset("vendor/mediapipe/runtime/wasm"));

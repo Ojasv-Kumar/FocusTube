@@ -16,7 +16,6 @@ export const CONFIG = Object.freeze({
     callProfiles: {
       expand: { temperature: 0.3, numPredict: 72 },
       judge: { temperature: 0.1, numPredict: 192 },
-      interestPlan: { temperature: 0.4, numPredict: 80 },
       curiosity: { temperature: 0.8, numPredict: 96 },
       repair: { temperature: 0, numPredict: 96 },
       test: { temperature: 0, numPredict: 64 }
@@ -38,21 +37,17 @@ export const CONFIG = Object.freeze({
     maxVideosShown: 50, // Maximum videos across all paged batches
     feedBatchSize: 12, // Initial/next visible batch; next batch is prefetched in the background
     prefetchDelayMs: 250,
-    interestPlanQueries: 5, // compact expansion plan cached once per interest
-    interestQueriesPerFeed: 5, // original query plus four planned searches
-    interestFallbackQuerySuffixes: ["explained", "analysis", "deep dive", "documentary", "history", "hidden details", "theories", "case study", "interview", "timeline", "beginner guide", "advanced concepts", "myths and misconceptions", "behind the scenes", "underrated"],
     curiosityAreaStride: 7, // deterministic permutation stride; coprime with 30 configured areas
     curiosityRecentPages: 3,
     curiosityMaxRecentQueries: 6,
-    rankingBatchSize: 6, // Two compact Ollama judge calls make one 12-video page; avoids long truncated generations
-    learnRankingBatchSize: 6, // Keep Learn JSON compact while still returning a 10-12 video page
+    rankingBatchSize: 12, // One compact Ollama judge call ranks a visible page
+    learnRankingBatchSize: 12, // Rank a page in one Ollama round trip to avoid serial model latency
     rankingOutputTokenBase: 32,
     rankingOutputTokensPerCandidate: 24,
-    minInterestRelevance: 0.6,
     minJudgeQuality: 0.5,
     minCuriositySubstance: 0.7,
     excludeLiveStreams: true,
-    curiosityQueriesPerFeed: 6,
+    curiosityQueriesPerFeed: 4, // Four concurrent topic searches keep variety without a six-request wait
     curiosityAreas: [
       "science explainers physics space biology chemistry", "math and visual intuition", "history and documentaries",
       "philosophy and psychology", "economics finance and money systems", "geopolitics and world affairs",
@@ -70,12 +65,9 @@ export const CONFIG = Object.freeze({
     retrievalTimeoutMs: 12_000, // bound the whole retrieval phase
     totalTimeoutMs: 45_000, // Bound every feed stage; expansion/ranking each have their own stricter timeout
     queryMaxChars: 240,
-    titleMaxChars: 90,
+    titleMaxChars: 80,
     channelNameMaxChars: 120,
     reasonMaxChars: 140,
-    interestChannelSuggestions: 4, // 0..20 names from the compact expansion response
-    channelSuggestionMaxChars: 100,
-    interestFallbackQueries: 4, // 1..8 comma-separated fallback searches
     curiositySeedChannelsPerFeed: 0, // Diverse topic queries outperform channel-only searches
     curiosityMaximumSensationalScore: 0.75, // 0..1; higher scores are filtered
     maxVideosPerCuriosityQuery: 2, // Hard cap to prevent one topic/source query dominating a batch
@@ -99,7 +91,6 @@ export const CONFIG = Object.freeze({
   },
   Modes: {
     learn: { hideHomeFeed: true, hideShorts: true, hideSubscriptions: false, hideNotifications: true, hideSidebarRecommendations: true, hideEndscreen: true, disableAutoplay: true, hideComments: false, hideTrending: true, redirectShortsToWatch: true, rankingProfile: "learning" },
-    interest: { hideHomeFeed: true, hideShorts: true, hideSidebarRecommendations: false, hideEndscreen: true, disableAutoplay: true, hideComments: false, hideTrending: true, redirectShortsToWatch: true, rankingProfile: "interest" },
     curiosity: { hideHomeFeed: true, hideShorts: true, hideSidebarRecommendations: false, hideEndscreen: true, disableAutoplay: true, hideComments: false, hideTrending: true, redirectShortsToWatch: true, rankingProfile: "substance" },
     relax: { hideHomeFeed: false, hideShorts: false, hideSidebarRecommendations: false, hideEndscreen: false, disableAutoplay: false, hideComments: false, hideTrending: false, redirectShortsToWatch: false, rankingProfile: "none" }
   },
@@ -110,11 +101,10 @@ export const CONFIG = Object.freeze({
     clickbaitPhrases: ["you won't believe", "shocking", "gone wrong", "exposed", "insane", "must watch", "destroyed", "what happens next"],
     weights: {
       learn: { fit: 0.50, quality: 0.30, engagement: 0.05, duration: 0.10, channel: 0.05 },
-      interest: { fit: 0.50, quality: 0.25, engagement: 0.10, duration: 0.05, channel: 0.10 },
       curiosity: { fit: 0.40, quality: 0.35, engagement: 0.15, duration: 0.05, channel: 0.05 }
     },
-    idealDurationMinutes: { learn: { min: 8, max: 40 }, interest: { min: 5, max: 45 }, curiosity: { min: 5, max: 35 } },
-    maxPerChannel: { learn: 2, interest: 3, curiosity: 2 }
+    idealDurationMinutes: { learn: { min: 8, max: 40 }, curiosity: { min: 5, max: 35 } },
+    maxPerChannel: { learn: 2, curiosity: 2 }
   },
   Behaviour: { debugLogging: false, showFloatingSwitcher: false, gateWatchdogMs: 15_000, maxWaitMs: 8_000, selectorRetryMs: 250, navigationDebounceMs: 100, autoplayCheckMs: 1_000, autoplayMaxChecks: 12 },
   Settings: { hideShortsInLearn: true, disableAutoplayInLearn: true, resultsPerSearch: 50, showReasons: false, defaultInterestTopic: "", curiosityStrictness: "balanced", density: "comfortable", mockMode: false, debugLogging: false, askForModeEveryTab: true, keepCommentsVisible: true },
@@ -124,7 +114,6 @@ export const CONFIG = Object.freeze({
     labels: { intro: "Start here", deep_dive: "Go deeper", hands_on: "Build it", reference: "Keep handy", other: "More useful picks" },
     modeDescriptions: {
       learn: "Learn something specific, with a guided path.",
-      interest: "Explore one interest through videos and channels.",
       curiosity: "Browse broadly, with an eye for high substance.",
       relax: "Use YouTube as usual."
     }
@@ -140,7 +129,6 @@ export const CONFIG = Object.freeze({
     videosListCost: 1,
     apiResetTimeZone: "America/Los_Angeles"
   },
-  ModesPicker: { interestMaxChars: 120, interestMinChars: 2 }
 });
 
 export function validateConfig(config = CONFIG) {

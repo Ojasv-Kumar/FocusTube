@@ -13,7 +13,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   curiosityStrictness: CONFIG.Settings.curiosityStrictness, density: CONFIG.Settings.density,
   mockMode: CONFIG.Settings.mockMode, debugLogging: CONFIG.Settings.debugLogging,
   hideCommentsInLearn: false, hideSubscriptionsInLearn: true, theme: "dark",
-  cameraEnabled: false, cameraCalibration: null
+  cameraEnabled: false, cameraCalibration: null, learnModeLockUntil: 0
 });
 const obsoleteKeys = [
   "llmApiKey", "llmBaseUrl", "fastModel", "smartModel",
@@ -52,12 +52,13 @@ export function validateSettings(input = {}) {
   if (typeof input.hideSubscriptionsInLearn === "boolean") out.hideSubscriptionsInLearn = input.hideSubscriptionsInLearn;
   if (["dark", "light"].includes(input.theme)) out.theme = input.theme;
   if (typeof input.cameraEnabled === "boolean") out.cameraEnabled = input.cameraEnabled;
+  if (Number.isFinite(input.learnModeLockUntil) && input.learnModeLockUntil > 0) out.learnModeLockUntil = Math.floor(input.learnModeLockUntil);
   const calibration = input.cameraCalibration;
   if (calibration && calibration.version === 1 && Number.isFinite(calibration.yaw) && Number.isFinite(calibration.pitch)) {
     out.cameraCalibration = { version: 1, yaw: calibration.yaw, pitch: calibration.pitch };
   }
   if (!out.cameraCalibration) out.cameraEnabled = false;
-  if (["learn", "interest", "curiosity", "relax"].includes(input.activeMode)) out.activeMode = input.activeMode;
+  if (["learn", "curiosity", "relax"].includes(input.activeMode)) out.activeMode = input.activeMode;
   out.interestText ||= out.defaultInterestTopic;
   return out;
 }

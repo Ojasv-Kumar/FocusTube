@@ -1,9 +1,9 @@
 import { FilesetResolver, FaceLandmarker, GestureRecognizer } from "../../vendor/mediapipe/runtime/vision_bundle.mjs";
-import { faceDirection, isAway, isOpenPalm } from "./attention-logic.js";
+import { faceDirection, isAway, classifyHandGesture } from "./attention-logic.js";
 
 const video = document.getElementById("camera");
 const TASK = "focustube.camera";
-let stream = null, face = null, hands = null, timer = 0, current = null, lastAlert = new Map(), activeAlerts = new Set(), awaySince = 0, missingSince = 0, palmSince = 0, palmLatched = false, lastTick = 0, faceGraceUntil = 0;
+let stream = null, face = null, hands = null, timer = 0, current = null, lastAlert = new Map(), activeAlerts = new Set(), awaySince = 0, missingSince = 0, palmSince = 0, palmLatched = false, actionSince = 0, actionGesture = null, actionLatched = false, actionReleaseSince = 0, seekRepeatAt = 0, fastPlayActive = false, lastTick = 0, faceGraceUntil = 0;
 const asset = path => chrome.runtime.getURL(path);
 const send = (type, payload = {}) => chrome.runtime.sendMessage({ namespace: TASK, type, payload }).catch(() => {});
 
@@ -14,10 +14,11 @@ async function initialize() {
 }
 
 function stop() {
+  if (fastPlayActive && current) void send("PLAYBACK_SPEED", { tabId: current.tabId, active: false });
   if (timer) clearTimeout(timer); timer = 0;
   for (const track of stream?.getTracks?.() || []) track.stop(); stream = null;
   video.srcObject = null; face?.close(); hands?.close(); face = null; hands = null; current = null;
-  awaySince = missingSince = palmSince = lastTick = faceGraceUntil = 0; palmLatched = false; lastAlert.clear(); activeAlerts.clear();
+  awaySince = missingSince = palmSince = actionSince = actionReleaseSince = seekRepeatAt = lastTick = faceGraceUntil = 0; palmLatched = actionLatched = fastPlayActive = false; actionGesture = null; lastAlert.clear(); activeAlerts.clear();
 }
 
 async function start(payload) {
@@ -63,11 +64,33 @@ function tick() {
     lastTick = now;
     try {
       const gestureResult = hands.recognizeForVideo(video, now);
-      const palm = isOpenPalm(gestureResult, video.videoWidth / video.videoHeight || 4 / 3);
-      if (palm) {
+      const gesture = classifyHandGesture(gestureResult, video.videoWidth / video.videoHeight || 4 / 3);
+      if (gesture === "open-palm") {
         if (!palmSince) palmSince = now;
         if (!palmLatched && now - palmSince >= 180) { palmLatched = true; void send("OPEN_PALM", { tabId: current.tabId }); }
       } else { palmSince = 0; palmLatched = false; }
+      const isSeek = gesture === "seek-forward" || gesture === "seek-backward";
+      const isAction = isSeek || gesture === "fast-play";
+      if (isAction) {
+        actionReleaseSince = 0;
+        if (actionGesture !== gesture) {
+          if (fastPlayActive) { void send("PLAYBACK_SPEED", { tabId: current.tabId, active: false }); fastPlayActive = false; }
+          actionGesture = gesture; actionSince = now; actionLatched = false; seekRepeatAt = 0;
+        }
+        if (isSeek && !actionLatched && now - actionSince >= 100) {
+          actionLatched = true; seekRepeatAt = now;
+          void send("PLAYBACK_SEEK", { tabId: current.tabId, delta: gesture === "seek-forward" ? 10 : -10 });
+        } else if (isSeek && actionLatched && now - actionSince >= 1000 && now - seekRepeatAt >= 500) {
+          seekRepeatAt = now;
+          void send("PLAYBACK_SEEK", { tabId: current.tabId, delta: gesture === "seek-forward" ? 10 : -10 });
+        } else if (gesture === "fast-play" && !actionLatched && now - actionSince >= 100) {
+          actionLatched = true; fastPlayActive = true; void send("PLAYBACK_SPEED", { tabId: current.tabId, active: true });
+        }
+      } else if (!actionReleaseSince) actionReleaseSince = now;
+      else if (now - actionReleaseSince >= 200) {
+        if (fastPlayActive) void send("PLAYBACK_SPEED", { tabId: current.tabId, active: false });
+        actionGesture = null; actionSince = actionReleaseSince = seekRepeatAt = 0; actionLatched = fastPlayActive = false;
+      }
 
       if (!current.gestureOnly) {
         const faceResult = face.detectForVideo(video, now), direction = faceDirection(faceResult.faceLandmarks?.[0]);

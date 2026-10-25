@@ -2,14 +2,25 @@
   if (window.__FOCUSTUBE_ATTENTION__) return;
   window.__FOCUSTUBE_ATTENTION__ = true;
   const namespace = "focustube.camera";
-  let activeMode = "relax", cameraEnabled = false, video = null, heartbeat = 0, observer = null, gesturePaused = false, lastState = "", warningHost = null, audioContext = null;
+  let activeMode = "relax", cameraEnabled = false, video = null, heartbeat = 0, observer = null, gesturePaused = false, lastState = "", warningHost = null, audioContext = null, speedVideo = null, savedPlaybackRate = null;
   const activeAlerts = new Set();
 
   function onWatchPage() { return location.pathname === "/watch" && Boolean(new URL(location.href).searchParams.get("v")); }
   function currentVideo() { return document.querySelector("video.html5-main-video") || document.querySelector("ytd-player video") || document.querySelector("video"); }
+  function clearGestureSpeed() {
+    if (speedVideo && savedPlaybackRate !== null) speedVideo.playbackRate = savedPlaybackRate;
+    speedVideo = null; savedPlaybackRate = null;
+  }
+  function setGestureSpeed(active) {
+    if (active) {
+      if (!onWatchPage() || !video || video.paused || savedPlaybackRate !== null) return;
+      speedVideo = video; savedPlaybackRate = video.playbackRate; video.playbackRate = 2;
+    } else clearGestureSpeed();
+  }
   function tellWorker() {
     const candidate = currentVideo();
     if (candidate !== video) {
+      clearGestureSpeed();
       if (video) { video.removeEventListener("play", handlePlaybackStarted); video.removeEventListener("pause", tellWorker); video.removeEventListener("ended", tellWorker); }
       video = candidate;
       if (video) { video.addEventListener("play", handlePlaybackStarted); video.addEventListener("pause", tellWorker); video.addEventListener("ended", tellWorker); }
@@ -110,6 +121,11 @@
     } else { gesturePaused = true; video.pause(); }
     lastState = ""; tellWorker();
   }
+  function seekFromGesture(delta) {
+    if (!onWatchPage() || !video || video.paused || !Number.isFinite(delta)) return;
+    const duration = Number.isFinite(video.duration) ? video.duration : Infinity;
+    video.currentTime = Math.max(0, Math.min(duration, video.currentTime + delta));
+  }
 
   chrome.runtime.onMessage.addListener(message => {
     if (message?.namespace !== namespace) return false;
@@ -125,6 +141,8 @@
       if (!activeAlerts.size) clearWarning();
     }
     if (message.type === "ATTENTION_GESTURE") toggleFromGesture();
+    if (message.type === "ATTENTION_SEEK") seekFromGesture(message.payload?.delta);
+    if (message.type === "ATTENTION_PLAYBACK_SPEED") setGestureSpeed(message.payload?.active === true);
     if (message.type === "CAMERA_ERROR") {
       activeAlerts.clear(); showWarning("camera-error");
     }
@@ -139,11 +157,11 @@
     lastState = ""; if (!cameraEnabled) gesturePaused = false;
     tellWorker();
   });
-  for (const event of ["yt-navigate-start", "yt-navigate-finish", "popstate", "focus", "blur"]) window.addEventListener(event, () => { lastState = ""; if (!onWatchPage()) { gesturePaused = false; clearWarning(); } tellWorker(); });
+  for (const event of ["yt-navigate-start", "yt-navigate-finish", "popstate", "focus", "blur"]) window.addEventListener(event, () => { lastState = ""; if (!onWatchPage()) { gesturePaused = false; clearWarning(); clearGestureSpeed(); } tellWorker(); });
   document.addEventListener("visibilitychange", () => { lastState = ""; tellWorker(); });
   observer = new MutationObserver(() => { if (!video?.isConnected || !currentVideo()) tellWorker(); });
   observer.observe(document.documentElement, { childList: true, subtree: true });
   heartbeat = setInterval(() => { lastState = ""; tellWorker(); }, 1500);
-  window.addEventListener("pagehide", () => { clearInterval(heartbeat); observer?.disconnect(); warningHost?.remove(); try { chrome.runtime.sendMessage({ namespace, type: "PLAYBACK_STATE", payload: { isWatch: false, isPlaying: false, gesturePaused: false, visible: false, mode: activeMode, cameraEnabled: false, url: location.href } }); } catch {} }, { once: true });
+  window.addEventListener("pagehide", () => { clearInterval(heartbeat); observer?.disconnect(); warningHost?.remove(); clearGestureSpeed(); try { chrome.runtime.sendMessage({ namespace, type: "PLAYBACK_STATE", payload: { isWatch: false, isPlaying: false, gesturePaused: false, visible: false, mode: activeMode, cameraEnabled: false, url: location.href } }); } catch {} }, { once: true });
   tellWorker();
 })();

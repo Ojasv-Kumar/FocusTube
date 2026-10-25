@@ -12,6 +12,7 @@
   ],
   "host_permissions": [
     "https://www.youtube.com/*",
+    "https://youtube.com/*",
     "https://www.googleapis.com/*"
   ],
   "optional_host_permissions": [
@@ -35,17 +36,23 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.youtube.com/*"
+        "https://www.youtube.com/*",
+        "https://youtube.com/*"
       ],
       "js": [
         "src/content/loader.js",
-        "src/content/focustube.bundle.js",
         "src/content/attention.js"
       ],
       "css": [
         "src/content/hide.css"
       ],
       "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/*.js", "src/content/*.js"],
+      "matches": ["https://www.youtube.com/*", "https://youtube.com/*"]
     }
   ]
 }

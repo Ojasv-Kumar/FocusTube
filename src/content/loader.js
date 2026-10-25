@@ -45,12 +45,18 @@ if (!tabAlreadyChosen) {
       }
     });
     mediaObserver.observe(root, { childList: true, subtree: true });
-    // The packaged content bundle runs immediately after this bootstrap.
-    // Keep a fixed watchdog here so the bootstrap does not need an ES module
-    // import from the YouTube document origin.
-    gateTimer = setTimeout(() => gate.fail(), 15_000);
+    // The extension's module entry is imported below after the page is gated.
+    // The dynamic module load can be slower on first install. Restore YouTube
+    // silently on timeout; a later successful boot will finish applying mode.
+    gateTimer = setTimeout(() => gate.release(), 20_000);
   } catch (error) {
     try { console.warn("[FocusTube][loader] FocusTube could not initialize.", error?.name || "error"); } catch { /* page remains untouched */ }
     gate.fail();
   }
 }
+// Load the maintained source modules directly. This keeps the unpacked build
+// from depending on a stale generated bundle after a source edit.
+import(chrome.runtime.getURL("src/content/main.js")).catch(error => {
+  try { console.warn("[FocusTube][loader] FocusTube could not initialize.", error?.name || "module error"); } catch { /* page remains untouched */ }
+  gate.fail();
+});

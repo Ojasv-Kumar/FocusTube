@@ -17,6 +17,6 @@ export function createLearnSearch({ query = "", anchor: suppliedAnchor = null, o
   form.append(input, submit);
   form.addEventListener("submit", event => { event.preventDefault(); const value = Array.from(input.value.trim()).slice(0, CONFIG.Pipeline.queryMaxChars).join(""); if (value) onSubmit(value); else input.focus(); });
   shadow.append(form);
-  anchor.append(host);
+  anchor.prepend(host);
   return { host, update(value) { input.value = Array.from(String(value || "")).slice(0, CONFIG.Pipeline.queryMaxChars).join(""); }, dispose() { safeRemove(host); } };
 }
