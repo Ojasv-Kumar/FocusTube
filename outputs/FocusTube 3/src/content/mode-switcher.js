@@ -9,10 +9,10 @@ export function createModeSwitcher(onOpen) {
   const { host, shadow } = pair;
   addStyle(shadow, componentCss() + SWITCHER_CSS);
   const control = element("div", { className: "control" });
-  const label = element("span", { className: "label", text: "FocusTube · Relax" });
+  const label = element("span", { className: "label", text: "YourTube · Relax" });
   const switchButton = button("Switch mode", "switch", onOpen);
-  switchButton.setAttribute("aria-label", "Switch FocusTube mode");
+  switchButton.setAttribute("aria-label", "Switch YourTube mode");
   control.append(label, switchButton); shadow.append(control);
   (document.documentElement || document.body).append(host);
-  return { host, update(mode) { label.textContent = `FocusTube · ${LABEL[mode] || LABEL.relax}`; }, dispose() { safeRemove(host); } };
+  return { host, update(mode) { label.textContent = `YourTube · ${LABEL[mode] || LABEL.relax}`; }, dispose() { safeRemove(host); } };
 }

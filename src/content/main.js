@@ -10,6 +10,7 @@ import { createModeSwitcher } from "./mode-switcher.js";
 import { createResultsUI } from "./results-ui.js";
 import { createHomeUI } from "./home-ui.js";
 import { createLearnSearch } from "./learn-search.js";
+import { openLearnAssistantOverlay } from "./learn-assistant.js";
 import { startAutoplayGuard } from "./autoplay.js";
 
 let settings = { ...DEFAULT_SETTINGS };
@@ -20,6 +21,7 @@ let modeLockNotice = null;
 let modeLockNoticeTimer = 0;
 let resultsUI = null;
 let homeUI = null;
+let learnAssistantUI = null;
 let learnSearchUI = null;
 let autoplayCleanup = null;
 let requestToken = 0;
@@ -38,6 +40,7 @@ let currentPageType = "other";
 function hideCurrentPanels() {
   resultsUI?.dispose(); resultsUI = null;
   homeUI?.dispose(); homeUI = null;
+  learnAssistantUI?.dispose(); learnAssistantUI = null;
   learnSearchUI?.dispose(); learnSearchUI = null;
   autoplayCleanup?.(); autoplayCleanup = null;
   setCuratedSearch(false);
@@ -88,6 +91,7 @@ function openPicker() {
   picker = openModePicker({
     currentMode: activeMode,
     required: Boolean(document.documentElement?.hasAttribute("data-focustube-gate")),
+    showIntro: Boolean(document.documentElement?.hasAttribute("data-focustube-gate")),
     onSelect: async mode => {
       const response = await persistMode(mode, { deferApply: true });
       if (!response?.ok) return response;
@@ -396,20 +400,28 @@ async function applyPageBehavior(reason = "navigation") {
     if (currentPageType === "home") {
       const anchor = await waitForElement(["ytd-browse[page-subtype='home'] #primary", "ytd-browse #primary", "ytd-app #content"]);
       if (token !== requestToken || !anchor) return;
+      const submitLearnQuery = value => {
+        const safeQuery = normalizeQuery(value, CONFIG.Pipeline.queryMaxChars);
+        if (!safeQuery) return;
+        try { location.href = `/results?search_query=${encodeURIComponent(safeQuery)}`; }
+        catch { logger.warn("content", "could not submit the learning prompt"); }
+      };
+      const setLearnTimer = async durationSeconds => {
+        const response = await sendMessage(MESSAGE.SET_LEARN_TIMER, { durationSeconds }, makeCorrelationId());
+        if (response?.ok) settings.learnModeLockUntil = response.learnModeLockUntil || response.settings?.learnModeLockUntil || 0;
+        return response;
+      };
+      if (activeMode === "learn") {
+        learnAssistantUI = openLearnAssistantOverlay({ onSubmit: submitLearnQuery, onSetLearnTimer: setLearnTimer });
+        if (!learnAssistantUI) {
+          homeUI = createHomeUI({ mode: "learn", onSetLearnTimer: setLearnTimer, onSearch: submitLearnQuery });
+        }
+        return;
+      }
       homeUI = createHomeUI({
         mode: activeMode,
-        learnModeLockUntil: settings.learnModeLockUntil,
-        onSetLearnTimer: async durationSeconds => {
-          const response = await sendMessage(MESSAGE.SET_LEARN_TIMER, { durationSeconds }, makeCorrelationId());
-          if (response?.ok) settings.learnModeLockUntil = response.learnModeLockUntil || response.settings?.learnModeLockUntil || 0;
-          return response;
-        },
-        onSearch: value => {
-          const safeQuery = normalizeQuery(value, CONFIG.Pipeline.queryMaxChars);
-          if (!safeQuery) return;
-          try { location.href = `/results?search_query=${encodeURIComponent(safeQuery)}`; }
-          catch { logger.warn("content", "could not submit the learning prompt"); }
-        },
+        onSetLearnTimer: setLearnTimer,
+        onSearch: submitLearnQuery,
         onUseOriginal: () => persistMode("relax"),
         onRefresh: () => {
           // Curiosity query plans rotate by page. Advancing here also gives the

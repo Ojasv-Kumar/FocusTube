@@ -114,3 +114,36 @@ $("health").addEventListener("click", async () => {
 });
 try { paint(await getSettings()); tell("Preferences loaded."); }
 catch { tell("Could not load preferences.", true); }
+
+// Drive the decorative depth layers without moving or resizing the settings UI.
+if (!matchMedia("(prefers-reduced-motion: reduce)").matches && matchMedia("(pointer: fine)").matches) {
+  let pointerFrame = 0, latestPointer = null, scrollFrame = 0;
+  const paintPointer = () => {
+    pointerFrame = 0;
+    if (!latestPointer) return;
+    const x = (latestPointer.x / Math.max(1, innerWidth) - 0.5) * 16;
+    const y = (latestPointer.y / Math.max(1, innerHeight) - 0.5) * 16;
+    document.documentElement.style.setProperty("--parallax-x", `${x.toFixed(2)}px`);
+    document.documentElement.style.setProperty("--parallax-y", `${y.toFixed(2)}px`);
+    document.documentElement.style.setProperty("--logo-x", `${(x * -0.18).toFixed(2)}px`);
+    document.documentElement.style.setProperty("--logo-y", `${(y * -0.18).toFixed(2)}px`);
+  };
+  addEventListener("pointermove", event => {
+    latestPointer = { x: event.clientX, y: event.clientY };
+    if (!pointerFrame) pointerFrame = requestAnimationFrame(paintPointer);
+  }, { passive: true });
+  addEventListener("pointerleave", () => {
+    latestPointer = null;
+    document.documentElement.style.removeProperty("--parallax-x");
+    document.documentElement.style.removeProperty("--parallax-y");
+    document.documentElement.style.removeProperty("--logo-x");
+    document.documentElement.style.removeProperty("--logo-y");
+  }, { passive: true });
+  addEventListener("scroll", () => {
+    if (scrollFrame) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = 0;
+      document.documentElement.style.setProperty("--page-scroll-shift", `${Math.max(-6, Math.min(6, scrollY * -0.012)).toFixed(2)}px`);
+    });
+  }, { passive: true });
+}

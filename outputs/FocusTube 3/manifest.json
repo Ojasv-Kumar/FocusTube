@@ -51,7 +51,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["src/*.js", "src/content/*.js"],
+      "resources": ["src/*.js", "src/content/*.js", "assets/*"],
       "matches": ["https://www.youtube.com/*", "https://youtube.com/*"]
     }
   ]

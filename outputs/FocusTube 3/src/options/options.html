@@ -1,7 +1,132 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FocusTube · Preferences</title><link rel="stylesheet" href="../design-tokens.css"><link rel="stylesheet" href="options.css"></head><body>
-<main class="page"><header><p class="eyebrow">FOCUSTUBE / PREFERENCES</p><h1>Shape your viewing space.</h1><p>Preferences apply to YouTube tabs as you change them.</p></header>
-<form id="settings-form"><section class="section"><h2>Modes</h2><label class="check"><input id="ask-every-tab" type="checkbox"> Ask me what I’m here for in every new tab</label><label>Videos per feed batch<select id="results-count"><option>15</option><option>30</option><option selected>50</option></select></label><label>Curiosity filtering<select id="strictness"><option value="relaxed">Relaxed</option><option value="balanced">Balanced</option><option value="strict">Strict</option></select></label></section>
-<section class="section"><h2>Learn mode</h2><label class="check"><input id="hide-comments" type="checkbox"> Hide comments</label><label class="check"><input id="hide-subscriptions" type="checkbox"> Hide subscriptions</label><label>Extension appearance<select id="theme"><option value="dark">Dark</option><option value="light">Light</option></select></label><label class="check"><input id="camera-enabled" type="checkbox"> Enable camera attention alerts and open-palm playback control</label><p class="help">Camera monitoring runs only while a regular YouTube video is playing. It does not run on Shorts. Set up the camera once to grant permission and calibrate your normal screen-facing position.</p><div class="actions"><button id="camera-setup" type="button">Open camera setup</button></div></section>
-<section class="section"><h2>Local AI · Ollama on your friend's Mac</h2><label>Remote HTTPS bridge URL<input id="ollama-endpoint" autocomplete="off" spellcheck="false" placeholder="https://192.168.1.42:11435"></label><label>Bridge token<input id="ollama-token" type="password" autocomplete="off" spellcheck="false" placeholder="64-character token from .bridge-token"></label><label>Ollama model<input id="ollama-model" autocomplete="off" spellcheck="false" placeholder="qwen3:8b"></label><p class="help">Curiosity ranking and Learn query planning run on your friend's Mac. The bridge URL must use HTTPS, a private Wi-Fi IPv4 address, and port 11435. FocusTube requests browser access only for the exact bridge host you enter. The bearer token is stored in this browser's extension storage and is sent only to that bridge.</p><p class="help">One-time setup: on your friend's Mac install Ollama and run <code>ollama pull qwen3:8b</code>. In the included <code>remote-ollama-bridge</code> folder run <code>./generate-certs.sh FRIEND_MAC_PRIVATE_IP</code>, copy only <code>certs/ca.crt</code> to your Mac and trust it in Keychain Access, then run <code>./start-bridge.sh YOUR_EXTENSION_ID</code>. Copy the token from <code>cat .bridge-token</code> into this page. Full steps are in <code>OLLAMA-REMOTE-SETUP.md</code>.</p><p class="help"><strong>Security:</strong> use this only on a trusted private Wi-Fi network. The bridge enforces HTTPS, a shared token, the exact extension ID, private-LAN clients, a small API allowlist, and keeps Ollama itself on localhost. Do not port-forward this bridge or use it on public Wi-Fi.</p><button id="test-ollama" type="button">Test remote Ollama connection</button></section>
-<section class="section"><h2>Video search</h2><label>Retrieval source<select id="retrieval-provider"><option value="auto">Auto · API when configured, HTML fallback</option><option value="api">YouTube Data API with HTML fallback</option><option value="html">YouTube search page</option></select></label><label>YouTube Data API key<input id="youtube-api-key" type="password" autocomplete="off" spellcheck="false" placeholder="Optional · paste your key"></label><p class="help">Auto uses the YouTube Data API first when a key is saved, then falls back to YouTube search HTML. If you do not save a YouTube Data API key, no YouTube API request is made.</p><button id="test-youtube-api" type="button">Test YouTube Data API connection</button></section>
-<details class="section"><summary>Demo and diagnostics</summary><label class="check"><input id="mock" type="checkbox"> Use offline demo fixtures</label><label class="check"><input id="debug" type="checkbox"> Enable debug logging</label><div class="actions"><button id="health" type="button">Check current YouTube selectors</button><button id="clear-cache" type="button">Clear cache</button></div></details><p id="status" role="status" aria-live="polite">Loading preferences…</p><div class="actions sticky"><button class="primary" type="submit">Save preferences</button><button id="reset" type="button">Reset to defaults</button></div></form></main><script type="module" src="options.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>YourTube · Preferences</title>
+  <link rel="stylesheet" href="../design-tokens.css">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body class="options-page">
+  <div class="ambient" aria-hidden="true">
+    <span class="ambient-orbit orbit-top"></span>
+    <span class="ambient-orbit orbit-bottom"></span>
+    <span class="ambient-dots"></span>
+  </div>
+
+  <main class="page">
+    <header class="page-header">
+      <div class="brand-mark" role="img" aria-label="YourTube logo"><span class="brand-your">Your</span><span class="brand-tube">Tube</span></div>
+      <h1>Preferences</h1>
+      <p>Customize your YouTube experience.</p>
+    </header>
+
+    <form id="settings-form">
+      <section class="section" aria-labelledby="modes-title">
+        <header class="section-heading">
+          <span class="section-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="3.5" width="6" height="6" rx="1.3"/><rect x="14.5" y="3.5" width="6" height="6" rx="1.3"/><rect x="3.5" y="14.5" width="6" height="6" rx="1.3"/><rect x="14.5" y="14.5" width="6" height="6" rx="1.3"/></svg>
+          </span>
+          <div><h2 id="modes-title">Modes</h2><p>Control how YourTube adapts to different viewing modes.</p></div>
+        </header>
+
+        <label class="check">
+          <input id="ask-every-tab" type="checkbox">
+          <span class="control-copy"><span class="control-title">Ask me what I’m here for in every new tab</span><small>Show the mode selector each time you open a new YouTube tab.</small></span>
+        </label>
+
+        <label class="setting-row">
+          <span class="setting-copy"><span class="control-title">Videos per feed batch</span><small>Number of videos to fetch and display in each batch.</small></span>
+          <select id="results-count"><option>15</option><option>30</option><option selected>50</option></select>
+        </label>
+
+        <label class="setting-row">
+          <span class="setting-copy"><span class="control-title">Curiosity filtering</span><small>Control how strictly curiosity mode filters content.</small></span>
+          <select id="strictness"><option value="relaxed">Relaxed</option><option value="balanced">Balanced</option><option value="strict">Strict</option></select>
+        </label>
+      </section>
+
+      <section class="section" aria-labelledby="learn-title">
+        <header class="section-heading">
+          <span class="section-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M3.5 5.8c3.3-1.4 6.1-.9 8.5 1.3v13c-2.4-2.2-5.2-2.7-8.5-1.3v-13Z"/><path d="M20.5 5.8c-3.3-1.4-6.1-.9-8.5 1.3v13c2.4-2.2 5.2-2.7 8.5-1.3v-13Z"/></svg>
+          </span>
+          <div><h2 id="learn-title">Learn mode</h2><p>Customize the learning environment on YouTube.</p></div>
+        </header>
+
+        <label class="check">
+          <input id="hide-comments" type="checkbox">
+          <span class="control-copy"><span class="control-title">Hide comments</span><small>Remove the comments section from videos in Learn mode.</small></span>
+        </label>
+
+        <label class="check">
+          <input id="hide-subscriptions" type="checkbox">
+          <span class="control-copy"><span class="control-title">Hide subscriptions</span><small>Remove subscriptions from the sidebar in Learn mode.</small></span>
+        </label>
+
+        <label class="setting-row">
+          <span class="setting-copy"><span class="control-title">Extension appearance</span><small>Choose the appearance used by YourTube.</small></span>
+          <select id="theme"><option value="dark">Dark</option><option value="light">Light</option></select>
+        </label>
+
+        <label class="check check-switch">
+          <input id="camera-enabled" type="checkbox">
+          <span class="control-copy"><span class="control-title">Enable camera attention alerts and open-palm playback control</span><small>Use camera gestures to control playback and receive attention alerts.</small></span>
+        </label>
+        <p class="help">Camera monitoring runs only while a regular YouTube video is playing. It does not run on Shorts. Set up the camera once to grant permission and calibrate your normal screen-facing position.</p>
+        <div class="actions"><button id="camera-setup" type="button">Open camera setup</button></div>
+      </section>
+
+      <section class="section" aria-labelledby="ollama-title">
+        <header class="section-heading">
+          <span class="section-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="5" rx="1.4"/><rect x="4" y="15" width="16" height="5" rx="1.4"/><path d="M7.5 6.5h.01M7.5 17.5h.01M11 6.5h5M11 17.5h5"/></svg>
+          </span>
+          <div><h2 id="ollama-title">Local AI · Ollama on your friend's Mac</h2><p>Connect YourTube to a model running on a trusted local network.</p></div>
+        </header>
+
+        <label class="field-stack">Remote HTTPS bridge URL<input id="ollama-endpoint" autocomplete="off" spellcheck="false" placeholder="https://192.168.1.42:11435"></label>
+        <label class="field-stack">Bridge token<input id="ollama-token" type="password" autocomplete="off" spellcheck="false" placeholder="64-character token from .bridge-token"></label>
+        <label class="field-stack">Ollama model<input id="ollama-model" autocomplete="off" spellcheck="false" placeholder="qwen3:8b"></label>
+        <p class="help">Curiosity ranking and Learn query planning run on your friend's Mac. The bridge URL must use HTTPS, a private Wi-Fi IPv4 address, and port 11435. YourTube requests browser access only for the exact bridge host you enter. The bearer token is stored in this browser's extension storage and is sent only to that bridge.</p>
+        <p class="help">One-time setup: on your friend's Mac install Ollama and run <code>ollama pull qwen3:8b</code>. In the included <code>remote-ollama-bridge</code> folder run <code>./generate-certs.sh FRIEND_MAC_PRIVATE_IP</code>, copy only <code>certs/ca.crt</code> to your Mac and trust it in Keychain Access, then run <code>./start-bridge.sh YOUR_EXTENSION_ID</code>. Copy the token from <code>cat .bridge-token</code> into this page. Full steps are in <code>OLLAMA-REMOTE-SETUP.md</code>.</p>
+        <p class="help"><strong>Security:</strong> use this only on a trusted private Wi-Fi network. The bridge enforces HTTPS, a shared token, the exact extension ID, private-LAN clients, a small API allowlist, and keeps Ollama itself on localhost. Do not port-forward this bridge or use it on public Wi-Fi.</p>
+        <div class="actions"><button id="test-ollama" type="button">Test remote Ollama connection</button></div>
+      </section>
+
+      <section class="section" aria-labelledby="search-title">
+        <header class="section-heading">
+          <span class="section-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><circle cx="10.7" cy="10.7" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>
+          </span>
+          <div><h2 id="search-title">Video search</h2><p>Choose how YourTube retrieves candidate videos.</p></div>
+        </header>
+
+        <label class="setting-row">
+          <span class="setting-copy"><span class="control-title">Retrieval source</span><small>Select the primary source for video results.</small></span>
+          <select id="retrieval-provider"><option value="auto">Auto · API when configured, HTML fallback</option><option value="api">YouTube Data API with HTML fallback</option><option value="html">YouTube search page</option></select>
+        </label>
+        <label class="field-stack">YouTube Data API key<input id="youtube-api-key" type="password" autocomplete="off" spellcheck="false" placeholder="Optional · paste your key"></label>
+        <p class="help">Auto uses the YouTube Data API first when a key is saved, then falls back to YouTube search HTML. If you do not save a YouTube Data API key, no YouTube API request is made.</p>
+        <div class="actions"><button id="test-youtube-api" type="button">Test YouTube Data API connection</button></div>
+      </section>
+
+      <details class="section diagnostics">
+        <summary><span class="summary-title">Demo and diagnostics</span><span class="summary-note">Offline fixtures, logs, and recovery tools</span></summary>
+        <div class="details-content">
+          <label class="check"><input id="mock" type="checkbox"><span class="control-copy"><span class="control-title">Use offline demo fixtures</span><small>Use saved sample responses instead of live retrieval.</small></span></label>
+          <label class="check"><input id="debug" type="checkbox"><span class="control-copy"><span class="control-title">Enable debug logging</span><small>Write additional diagnostic information to the console.</small></span></label>
+          <div class="actions"><button id="health" type="button">Check current YouTube selectors</button><button id="clear-cache" type="button">Clear cache</button></div>
+        </div>
+      </details>
+
+      <p id="status" role="status" aria-live="polite">Loading preferences…</p>
+      <div class="actions sticky">
+        <button class="primary" type="submit"><span class="button-symbol" aria-hidden="true">✓</span>Save preferences</button>
+        <button id="reset" type="button" class="secondary"><span class="button-symbol reset-symbol" aria-hidden="true">↻</span>Reset to defaults</button>
+      </div>
+    </form>
+  </main>
+  <script type="module" src="options.js"></script>
+</body>
+</html>
